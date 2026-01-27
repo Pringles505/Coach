@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+!test/fixtures/**/node_modules/
+!test/fixtures/**/node_modules/**
+
+# Build outputs
+dist/
+out/
+
+# VS Code extension package
+*.vsix
+
+# IDE
+.vscode/
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+!.vscode/tasks.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Test coverage
+coverage/
+
+# TypeScript cache
+*.tsbuildinfo
+
+.claude/

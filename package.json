@@ -1,0 +1,345 @@
+{
+  "name": "code-reviewer-ai",
+  "displayName": "CodeReviewer AI",
+  "description": "AI-powered code optimizer, task assistant, and scheduling system for VS Code",
+  "version": "1.0.0",
+  "publisher": "code-reviewer",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "code-review",
+    "refactoring",
+    "testing",
+    "productivity",
+    "calendar",
+    "tasks"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "bin": {
+    "agent-review": "dist/cli.js"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "codeReviewer.analyzeFile",
+        "title": "CodeReviewer: Analyze Current File"
+      },
+      {
+        "command": "codeReviewer.analyzeWorkspace",
+        "title": "CodeReviewer: Analyze Workspace"
+      },
+      {
+        "command": "codeReviewer.summarizeFile",
+        "title": "CodeReviewer: Summarize This File"
+      },
+      {
+        "command": "codeReviewer.summarizeWorkspace",
+        "title": "CodeReviewer: Summarize Workspace"
+      },
+      {
+        "command": "codeReviewer.generateRefactorPlan",
+        "title": "CodeReviewer: Generate Refactor Plan"
+      },
+      {
+        "command": "codeReviewer.generateTests",
+        "title": "CodeReviewer: Generate Tests for Selection"
+      },
+      {
+        "command": "codeReviewer.scheduleModuleFixes",
+        "title": "CodeReviewer: Schedule Fixes for This Module"
+      },
+      {
+        "command": "codeReviewer.openCalendar",
+        "title": "CodeReviewer: Open Calendar View"
+      },
+      {
+        "command": "codeReviewer.openDashboard",
+        "title": "CodeReviewer: Open Dashboard"
+      },
+      {
+        "command": "codeReviewer.configureAI",
+        "title": "CodeReviewer: Configure AI Provider"
+      },
+      {
+        "command": "codeReviewer.createTaskFromDescription",
+        "title": "CodeReviewer: Create Task from Description (AI)",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "codeReviewer.groupTasksByType",
+        "title": "CodeReviewer: Group Tasks by Type"
+      },
+      {
+        "command": "codeReviewer.groupTasksByStatus",
+        "title": "CodeReviewer: Group Tasks by Status"
+      },
+      {
+        "command": "codeReviewer.groupTasksByPriority",
+        "title": "CodeReviewer: Group Tasks by Priority"
+      },
+      {
+        "command": "codeReviewer.filterTasks",
+        "title": "CodeReviewer: Filter Tasks by Priority",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "codeReviewer.showOnlyHighPriority",
+        "title": "CodeReviewer: Show Only High Priority Tasks"
+      },
+      {
+        "command": "codeReviewer.showAllPriorities",
+        "title": "CodeReviewer: Show All Priority Levels"
+      },
+      {
+        "command": "codeReviewer.acceptSuggestion",
+        "title": "Accept Suggestion",
+        "icon": "$(check)"
+      },
+      {
+        "command": "codeReviewer.dismissSuggestion",
+        "title": "Dismiss Suggestion",
+        "icon": "$(x)"
+      },
+      {
+        "command": "codeReviewer.acceptAllSuggestions",
+        "title": "CodeReviewer: Accept All Suggestions",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "codeReviewer.dismissAllSuggestions",
+        "title": "CodeReviewer: Dismiss All Suggestions",
+        "icon": "$(trash)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codeReviewer",
+          "title": "CodeReviewer AI",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "codeReviewer": [
+        {
+          "id": "codeReviewer.dashboard",
+          "name": "Dashboard",
+          "type": "webview"
+        },
+        {
+          "id": "codeReviewer.tasks",
+          "name": "Tasks",
+          "type": "webview"
+        },
+        {
+          "id": "codeReviewer.codeHealth",
+          "name": "Code Health",
+          "type": "tree"
+        },
+        {
+          "id": "codeReviewer.calendar",
+          "name": "Calendar",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "CodeReviewer AI",
+      "properties": {
+        "codeReviewer.aiProvider": {
+          "type": "string",
+          "default": "anthropic",
+          "enum": ["anthropic", "openai", "azure", "ollama", "custom"],
+          "description": "AI provider to use for code analysis"
+        },
+        "codeReviewer.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the selected AI provider"
+        },
+        "codeReviewer.apiEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Custom API endpoint (for custom/ollama providers)"
+        },
+        "codeReviewer.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model to use for AI analysis (leave blank for provider default)"
+        },
+        "codeReviewer.analysisDepth": {
+          "type": "string",
+          "default": "moderate",
+          "enum": ["light", "moderate", "deep"],
+          "description": "Depth of code analysis"
+        },
+        "codeReviewer.autoAnalyze": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically analyze files on save"
+        },
+        "codeReviewer.inlineAnnotations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline code annotations"
+        },
+        "codeReviewer.workHoursStart": {
+          "type": "number",
+          "default": 9,
+          "description": "Start of work hours (24h format)"
+        },
+        "codeReviewer.workHoursEnd": {
+          "type": "number",
+          "default": 17,
+          "description": "End of work hours (24h format)"
+        },
+        "codeReviewer.focusSessionDuration": {
+          "type": "number",
+          "default": 90,
+          "description": "Default focus session duration in minutes"
+        },
+        "codeReviewer.excludePatterns": {
+          "type": "array",
+          "default": ["**/node_modules/**", "**/dist/**", "**/.git/**", "**/coverage/**"],
+          "description": "Glob patterns to exclude from analysis"
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "codeReviewer.analyzeFile",
+          "group": "codeReviewer@1"
+        },
+        {
+          "command": "codeReviewer.summarizeFile",
+          "group": "codeReviewer@2"
+        },
+        {
+          "command": "codeReviewer.generateTests",
+          "group": "codeReviewer@3",
+          "when": "editorHasSelection"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "codeReviewer.analyzeFile",
+          "group": "codeReviewer@1",
+          "when": "resourceScheme == file"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "codeReviewer.createTaskFromDescription",
+          "when": "view == codeReviewer.tasks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeReviewer.filterTasks",
+          "when": "view == codeReviewer.tasks",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codeReviewer.acceptAllSuggestions",
+          "when": "view == codeReviewer.tasks",
+          "group": "0_suggestions@1"
+        },
+        {
+          "command": "codeReviewer.dismissAllSuggestions",
+          "when": "view == codeReviewer.tasks",
+          "group": "0_suggestions@2"
+        },
+        {
+          "command": "codeReviewer.groupTasksByType",
+          "when": "view == codeReviewer.tasks",
+          "group": "1_grouping@1"
+        },
+        {
+          "command": "codeReviewer.groupTasksByStatus",
+          "when": "view == codeReviewer.tasks",
+          "group": "1_grouping@2"
+        },
+        {
+          "command": "codeReviewer.groupTasksByPriority",
+          "when": "view == codeReviewer.tasks",
+          "group": "1_grouping@3"
+        },
+        {
+          "command": "codeReviewer.showOnlyHighPriority",
+          "when": "view == codeReviewer.tasks",
+          "group": "2_filter@1"
+        },
+        {
+          "command": "codeReviewer.showAllPriorities",
+          "when": "view == codeReviewer.tasks",
+          "group": "2_filter@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "codeReviewer.acceptSuggestion",
+          "when": "view == codeReviewer.tasks && viewItem == suggestion",
+          "group": "inline@1"
+        },
+        {
+          "command": "codeReviewer.dismissSuggestion",
+          "when": "view == codeReviewer.tasks && viewItem == suggestion",
+          "group": "inline@2"
+        },
+        {
+          "command": "codeReviewer.acceptSuggestion",
+          "when": "view == codeReviewer.tasks && viewItem == suggestion",
+          "group": "suggestion@1"
+        },
+        {
+          "command": "codeReviewer.dismissSuggestion",
+          "when": "view == codeReviewer.tasks && viewItem == suggestion",
+          "group": "suggestion@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "compile": "tsc -p ./ --noEmit",
+    "compile:test": "tsc -p tsconfig.test.json",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run compile:test && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vitest run",
+    "package": "vsce package",
+    "build": "node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/picomatch": "^2.3.4",
+    "@types/uuid": "^9.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.19.8",
+    "eslint": "^8.55.0",
+    "typescript": "^5.3.2",
+    "vitest": "^2.1.9"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "fast-glob": "^3.3.2",
+    "jsonc-parser": "^3.3.1",
+    "picomatch": "^4.0.2",
+    "uuid": "^9.0.0"
+  }
+}

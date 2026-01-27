@@ -1,0 +1,13 @@
+{
+  "provider": {
+    "provider": "anthropic"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["**/node_modules/**", "**/dist/**", "**/.git/**"],
+  "analysisDepth": "light",
+  "maxFiles": 25,
+  "maxFileSizeBytes": 1048576,
+  "failOn": "warning",
+  "maxFindings": 50
+}
+
