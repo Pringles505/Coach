@@ -1,4 +1,5 @@
-# Coach
+![Coach Logo Dark](CoachLogoDark.png#gh-dark-mode-only)
+![Coach Logo Light](CoachLogoLight.png#gh-light-mode-only)
 
 An AI-powered VS Code extension that acts as your senior tech lead - analyzing code, identifying issues, generating tasks, and scheduling work automatically.
 
