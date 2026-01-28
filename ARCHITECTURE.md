@@ -1,4 +1,4 @@
-# CodeReviewer AI - Technical Architecture
+# Coach - Technical Architecture
 
 ## System Architecture Diagram
 

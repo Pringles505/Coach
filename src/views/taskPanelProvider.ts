@@ -8,7 +8,7 @@ import { Task, TaskStatus, TaskType, TaskPriority, TaskSource, TaskSuggestion } 
  * Shows suggestions at the top with accept/decline cards, then grouped tasks below.
  */
 export class TaskPanelProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'codeReviewer.tasks';
+    public static readonly viewType = 'coach.tasks';
 
     private _view?: vscode.WebviewView;
     private groupMode: 'type' | 'status' | 'priority' = 'type';
@@ -92,6 +92,9 @@ export class TaskPanelProvider implements vscode.WebviewViewProvider {
                 case 'completeTask':
                     await this.taskManager.completeTask(message.taskId);
                     break;
+                case 'forwardTask':
+                    vscode.commands.executeCommand('coach.forwardTask', message.taskId);
+                    break;
                 case 'setGroupMode':
                     this.groupMode = message.mode;
                     this.updateView();
@@ -101,7 +104,7 @@ export class TaskPanelProvider implements vscode.WebviewViewProvider {
                     this.updateView();
                     break;
                 case 'createAiTask':
-                    vscode.commands.executeCommand('codeReviewer.createTaskFromDescription');
+                    vscode.commands.executeCommand('coach.createTaskFromDescription');
                     break;
             }
         });
@@ -641,6 +644,10 @@ export class TaskPanelProvider implements vscode.WebviewViewProvider {
             event.stopPropagation();
             vscode.postMessage({ command: 'completeTask', taskId });
         }
+        function forwardTask(taskId) {
+            event.stopPropagation();
+            vscode.postMessage({ command: 'forwardTask', taskId });
+        }
         function setGroupMode(mode) {
             vscode.postMessage({ command: 'setGroupMode', mode });
         }
@@ -817,6 +824,7 @@ export class TaskPanelProvider implements vscode.WebviewViewProvider {
             <div class="task-actions">
                 <button class="task-action-btn" onclick="event.stopPropagation(); openTask('${task.id}')" title="Open">Open</button>
                 <button class="task-action-btn" onclick="completeTask('${task.id}')" title="Complete">✓</button>
+                <button class="task-action-btn" onclick="forwardTask('${task.id}')" title="Forward to Agent">Forward</button>
             </div>
         </div>
         <div class="task-details" id="task-details-${task.id}">

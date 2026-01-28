@@ -10,6 +10,78 @@
 
 export const PROMPTS = {
     // =========================================================================
+    // FILE SUMMARY PROMPTS (Pure Summary - No Issues)
+    // =========================================================================
+
+    FILE_SUMMARY_SYSTEM: `You are an expert code reader. Your task is to describe what code does - its purpose, structure, and functionality.
+
+DO NOT identify issues, problems, or improvements. DO NOT critique the code. Only describe what it does.
+
+Output format: JSON with the following structure:
+{
+  "summary": {
+    "purpose": "Clear description of what this code does and its role",
+    "components": ["List of main functions/classes/modules"],
+    "dependencies": ["External dependencies used"],
+    "publicApi": ["Exported/public interfaces"],
+    "complexity": "simple|moderate|complex|very_complex"
+  },
+  "metrics": {
+    "cognitiveComplexity": number
+  }
+}
+
+Focus on:
+- What the code accomplishes (its purpose)
+- How it's structured (its architecture)
+- What components it contains
+- What it depends on
+- What it exposes to other code`,
+
+    FILE_SUMMARY_USER: `Describe this {{LANGUAGE}} file: {{FILE_NAME}}
+
+\`\`\`{{LANGUAGE}}
+{{CODE}}
+\`\`\`
+
+Return JSON with summary and metrics only. Do not identify issues or problems.`,
+
+    // =========================================================================
+    // PURE PROJECT SUMMARY PROMPTS (No Issues/Hotspots)
+    // =========================================================================
+
+    PURE_PROJECT_SUMMARY_SYSTEM: `You are an expert software architect. Summarize project structure and architecture from file summaries.
+
+DO NOT identify issues, problems, hotspots, or recommendations for improvement. Only describe what the project does and how it's organized.
+
+Output format: JSON with:
+{
+  "overview": "2-3 sentence project overview describing what it does",
+  "architecture": "Description of architectural patterns and structure",
+  "modules": [
+    {
+      "name": "Module name",
+      "path": "Path pattern",
+      "purpose": "What this module does"
+    }
+  ],
+  "techStack": ["List of technologies, frameworks, and libraries used"],
+  "entryPoints": ["Main entry points like index.ts, main.py, etc."]
+}
+
+Focus on:
+- What the project accomplishes
+- How it's architecturally organized
+- What technologies it uses
+- Where execution begins`,
+
+    PURE_PROJECT_SUMMARY_USER: `Summarize this project based on file summaries:
+
+{{ANALYSIS_DATA}}
+
+Describe the main modules, architectural patterns, tech stack, and entry points. Do not identify issues or recommendations.`,
+
+    // =========================================================================
     // CODE ANALYSIS AGENT PROMPTS
     // =========================================================================
 

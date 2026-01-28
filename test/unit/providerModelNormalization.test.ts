@@ -31,5 +31,26 @@ describe('resolveProviderConfig model normalization', () => {
 
     expect(resolved.model).toBe('gpt-4o');
   });
+
+  it('normalizes provider name to lowercase and corrects model mismatch', () => {
+    // User might accidentally configure provider with different casing
+    const resolved = resolveProviderConfig(
+      { provider: 'OpenAI' as any, apiKey: 'sk-test', model: 'claude-sonnet-4-20250514' },
+      {}
+    );
+
+    expect(resolved.provider).toBe('openai');
+    expect(resolved.model).toBe('gpt-4o');
+  });
+
+  it('handles custom provider with Claude model', () => {
+    const resolved = resolveProviderConfig(
+      { provider: 'custom', apiKey: 'key', apiEndpoint: 'https://api.example.com', model: 'claude-3-opus' },
+      {}
+    );
+
+    expect(resolved.provider).toBe('custom');
+    expect(resolved.model).toBe('gpt-4o');
+  });
 });
 

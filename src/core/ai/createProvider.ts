@@ -13,19 +13,20 @@ const DEFAULT_MODELS: Record<string, string> = {
 
 function normalizeModelForProvider(provider: string, rawModel: string | undefined): string {
     const model = (rawModel || '').trim();
-    const fallback = DEFAULT_MODELS[provider] || 'gpt-4o';
+    const normalizedProvider = provider.toLowerCase();
+    const fallback = DEFAULT_MODELS[normalizedProvider] || 'gpt-4o';
 
     if (!model || model.toLowerCase() === 'auto') return fallback;
 
     const lower = model.toLowerCase();
 
     // Common misconfiguration: using an Anthropic Claude model with OpenAI(-compatible) providers.
-    if ((provider === 'openai' || provider === 'custom' || provider === 'azure') && lower.includes('claude')) {
+    if ((normalizedProvider === 'openai' || normalizedProvider === 'custom' || normalizedProvider === 'azure') && lower.includes('claude')) {
         return fallback;
     }
 
     // Common misconfiguration: using OpenAI model names with Anthropic provider.
-    if (provider === 'anthropic' && /(^gpt-|^o\\d|^o1|chatgpt|gpt-)/i.test(lower)) {
+    if (normalizedProvider === 'anthropic' && /(^gpt-|^o\d|^o1|chatgpt)/i.test(lower)) {
         return fallback;
     }
 
@@ -46,7 +47,7 @@ interface OllamaResponse {
 }
 
 export function resolveProviderConfig(provider: ProviderConfig, env: NodeJS.ProcessEnv = process.env): Required<ProviderConfig> {
-    const resolvedProvider = provider.provider || 'anthropic';
+    const resolvedProvider = (provider.provider || 'anthropic').toLowerCase() as ProviderConfig['provider'];
 
     const envApiKey =
         env.AGENTREVIEW_API_KEY ||
@@ -105,7 +106,10 @@ class AnthropicProvider implements AIProvider {
 
     async chat(messages: AgentMessage[], config?: Partial<AIRequestConfig>): Promise<string> {
         if (!this.apiKey) {
-            throw new AgentReviewError('Anthropic API key not configured (set ANTHROPIC_API_KEY or AGENTREVIEW_API_KEY).', 'CONFIG');
+            throw new AgentReviewError(
+                'Anthropic API key not configured. Set ANTHROPIC_API_KEY or AGENTREVIEW_API_KEY, or set "coach.apiKey" in VS Code settings, or add provider.apiKey to .coachrc.json.',
+                'CONFIG'
+            );
         }
 
         const anthropicMessages = messages
@@ -154,7 +158,10 @@ class OpenAIProvider implements AIProvider {
 
     async chat(messages: AgentMessage[], config?: Partial<AIRequestConfig>): Promise<string> {
         if (!this.apiKey) {
-            throw new AgentReviewError('OpenAI API key not configured (set OPENAI_API_KEY or AGENTREVIEW_API_KEY).', 'CONFIG');
+            throw new AgentReviewError(
+                'OpenAI API key not configured. Set OPENAI_API_KEY or AGENTREVIEW_API_KEY, or set "coach.apiKey" in VS Code settings, or add provider.apiKey to .coachrc.json.',
+                'CONFIG'
+            );
         }
 
         let lastError: Error | undefined;

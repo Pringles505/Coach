@@ -1,11 +1,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
 
 import { Command, CommanderError } from 'commander';
 
 import type { Logger } from '../core/document';
 import { NullLogger } from '../core/document';
-import type { AgentContext, FileAnalysis } from '../types';
+import type { AgentContext, PureFileSummary } from '../types';
 import { DEFAULTS, loadConfig, writeConfig, writeDefaultConfig } from '../core/config';
 import { formatJson } from '../core/formatters/json';
 import { formatMarkdown } from '../core/formatters/md';
@@ -20,8 +21,13 @@ import { runReview } from '../core/reviewEngine';
 import { languageIdFromPath } from '../core/reviewEngine';
 import type { ReviewSelectionMeta } from '../core/reviewEngine';
 import { createAIProvider } from '../core/ai/createProvider';
+import { resolveProviderConfig } from '../core/ai/createProvider';
 import { AgentReviewError as CoreAgentReviewError } from '../core/errors';
-import { findVscodeSettingsFile, loadVscodeReviewerSettings } from '../core/vscodeSettings';
+import { createNodeHost } from '../core/agentExecution/nodeHost';
+import { createTaskExecutionAgent } from '../core/agentExecution/taskExecutionAgent';
+import { ensureWorkspaceAgentsConfigFile, loadWorkspaceAgentsConfig, writeWorkspaceAgentsConfig } from '../core/agentExecution/workspaceConfig';
+import { resolveWorkspaceRoot } from '../core/workspaceRoot';
+import { findVscodeSettingsFile, loadVscodeReviewerAiSettings } from '../core/vscodeSettings';
 import { runShell } from './shell';
 import { createSpinner } from './spinner';
 import { CodeAnalysisAgent } from '../agents/codeAnalysisAgent';
@@ -48,19 +54,24 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
 
     const program = new Command();
     program
-        .name('agent-review')
-        .description('Agent-based code review (CLI for CodeReviewer AI)')
+        .name(deps.tool.name || 'coach')
+        .description('Coach CLI')
         .version(deps.tool.version)
         .option('-v, --verbose', 'Enable verbose logging');
     program.exitOverride();
+    program.configureOutput({
+        writeOut: (str) => io.stdout.write(str),
+        writeErr: (str) => io.stderr.write(str),
+        outputError: () => {}
+    });
 
     program
         .command('config')
         .description('Configuration helpers')
         .command('init')
-        .description('Create a default .agentreviewrc.json in the current directory')
+        .description('Create a default .coachrc.json in the current directory')
         .option('-f, --force', 'Overwrite if it already exists')
-        .option('--from-vscode', 'Seed config defaults from VS Code user settings (codeReviewer.*)')
+        .option('--from-vscode', 'Seed config defaults from VS Code user settings (coach.*; legacy: codeReviewer.*)')
         .action((opts: { force?: boolean }) => {
             const rootPath = process.cwd();
             if ((opts as any).fromVscode) {
@@ -68,7 +79,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
                 if (!settingsPath) {
                     throw new CoreAgentReviewError('Could not find VS Code settings.json to seed config', 'CONFIG');
                 }
-                const vs = loadVscodeReviewerSettings(settingsPath);
+                const vs = loadVscodeReviewerAiSettings(settingsPath);
                 const seeded = {
                     ...DEFAULTS,
                     provider: vs.provider?.provider ? { ...DEFAULTS.provider, ...vs.provider } : { ...DEFAULTS.provider },
@@ -86,9 +97,9 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
 
     program
         .command('shell')
-        .description('Interactive shell (run multiple commands in one session)')
+        .description('Start interactive shell')
         .option('--no-banner', 'Hide the startup banner')
-        .option('--prompt <prompt>', 'Prompt text', 'agent-review> ')
+        .option('--prompt <prompt>', 'Prompt text', 'coach> ')
         .action(async (opts: { banner?: boolean; prompt?: string }) => {
             const exitCode = await runShell(deps, { banner: opts.banner !== false, prompt: opts.prompt });
             (program as any).__exitCode = exitCode;
@@ -98,7 +109,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         .command('summarize')
         .description('Summarize a file or workspace (Markdown by default)')
         .argument('[path]', 'File or root path (default: current directory)')
-        .option('--no-from-vscode', 'Do not use VS Code user settings for provider/model/depth (codeReviewer.*)')
+        .option('--no-from-vscode', 'Do not use VS Code user settings for provider/model/depth (coach.*; legacy: codeReviewer.*)')
         .option('--format <format>', 'md|json', 'md')
         .option('--output <file>', 'Write output to a file (default: stdout)')
         .option('--provider <provider>', 'anthropic|openai|azure|ollama|custom')
@@ -112,7 +123,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         .option('--max-file-size <bytes>', 'Max file size in bytes', (v: string) => Number(v))
         .option('--no-spinner', 'Disable progress spinner (stderr)')
         .action(async (argPath: string | undefined, opts: any) => {
-            const targetPath = path.resolve(argPath || process.cwd());
+            const targetPath = argPath ? path.resolve(argPath) : resolveWorkspaceRoot(process.cwd());
 
             const verbose = Boolean(program.opts().verbose);
             const logger: Logger = verbose ? {
@@ -160,7 +171,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
                 const settingsPath = findVscodeSettingsFile(env);
                 if (settingsPath) {
                     try {
-                        const vs = loadVscodeReviewerSettings(settingsPath);
+                        const vs = loadVscodeReviewerAiSettings(settingsPath);
                         const providerFlagsUsed = Boolean(opts.provider || opts.apiKey || opts.apiEndpoint || opts.model);
                         const agentReviewEnvUsed = Boolean(env.AGENTREVIEW_PROVIDER || env.AGENTREVIEW_API_KEY || env.AGENTREVIEW_API_ENDPOINT || env.AGENTREVIEW_MODEL);
 
@@ -214,12 +225,12 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
                         getText: () => text
                     };
 
-                    const analysis = await agent.analyze(document, context);
+                    const summary = await agent.summarizeOnly(document, context);
 
                     if (format === 'json') {
-                        output = JSON.stringify(analysis, null, 2) + '\n';
+                        output = JSON.stringify(summary, null, 2) + '\n';
                     } else if (format === 'md' || format === 'markdown') {
-                        output = agent.formatSummary(analysis);
+                        output = agent.formatPureSummary(summary);
                     } else {
                         throw new CoreAgentReviewError(`Unknown format: ${format}`, 'CONFIG');
                     }
@@ -235,12 +246,11 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
                         throw new CoreAgentReviewError('No files matched include/exclude for workspace summary', 'CONFIG');
                     }
 
-                    const analyses = new Map<string, FileAnalysis>();
-                    let totalIssues = 0;
+                    const summaries = new Map<string, PureFileSummary>();
 
                     for (let i = 0; i < filePaths.length; i++) {
                         const filePath = filePaths[i];
-                        spinner?.update(`Analyzing ${i + 1}/${filePaths.length}: ${path.relative(rootPath, filePath).replace(/\\/g, '/')}`);
+                        spinner?.update(`Summarizing ${i + 1}/${filePaths.length}: ${path.relative(rootPath, filePath).replace(/\\/g, '/')}`);
                         const text = readTextFileSafe(filePath, config.maxFileSizeBytes);
                         if (text == null) continue;
 
@@ -250,27 +260,24 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
                             getText: () => text
                         };
 
-                        const analysis = await agent.analyze(document, context);
-                        analyses.set(filePath, analysis);
-                        totalIssues += analysis.issues.length;
+                        const summary = await agent.summarizeOnly(document, context);
+                        summaries.set(filePath, summary);
                     }
 
-                    spinner?.update(`Summarizing workspace (${analyses.size} file(s))...`);
-                    const projectSummary = await agent.summarizeProject(analyses);
+                    spinner?.update(`Summarizing workspace (${summaries.size} file(s))...`);
+                    const projectSummary = await agent.summarizeProjectOnly(summaries);
 
                     if (format === 'json') {
                         output = JSON.stringify({
                             rootPath,
-                            filesAnalyzed: analyses.size,
-                            totalIssues,
+                            filesAnalyzed: summaries.size,
                             projectSummary
                         }, null, 2) + '\n';
                     } else if (format === 'md' || format === 'markdown') {
-                        output = agent.formatProjectSummary(projectSummary, {
+                        output = agent.formatPureProjectSummary(projectSummary, {
                             rootPath,
                             analyzedAt: new Date(),
-                            filesAnalyzed: analyses.size,
-                            totalIssues
+                            filesAnalyzed: summaries.size
                         });
                     } else {
                         throw new CoreAgentReviewError(`Unknown format: ${format}`, 'CONFIG');
@@ -300,7 +307,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         .argument('[path]', 'Root path (default: current directory)')
         .option('--changed', 'Review only changed files (git status)')
         .option('--since <ref>', 'Review files changed since git ref (e.g., main)')
-        .option('--no-from-vscode', 'Do not use VS Code user settings for provider/model/depth (codeReviewer.*)')
+        .option('--no-from-vscode', 'Do not use VS Code user settings for provider/model/depth (coach.*; legacy: codeReviewer.*)')
         .option('--format <format>', 'pretty|json|sarif|md', 'pretty')
         .option('--output <file>', 'Write output to a file (default: stdout)')
         .option('--fail-on <level>', 'none|info|warning|error', 'warning')
@@ -316,7 +323,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
         .option('--max-file-size <bytes>', 'Max file size in bytes', (v: string) => Number(v))
         .option('--no-spinner', 'Disable progress spinner (stderr)')
         .action(async (argPath: string | undefined, opts: any) => {
-            const rootPath = path.resolve(argPath || process.cwd());
+            const rootPath = argPath ? path.resolve(argPath) : resolveWorkspaceRoot(process.cwd());
 
             const verbose = Boolean(program.opts().verbose);
             const logger: Logger = verbose ? {
@@ -360,7 +367,7 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
                 const settingsPath = findVscodeSettingsFile(env);
                 if (settingsPath) {
                     try {
-                        const vs = loadVscodeReviewerSettings(settingsPath);
+                        const vs = loadVscodeReviewerAiSettings(settingsPath);
 
                         // Prefer VS Code over config/defaults for local ergonomics, but never override explicit CLI/env flags.
                         // For deterministic CI, pass --no-from-vscode.
@@ -490,6 +497,201 @@ export async function runCli(argv: string[], deps: CliDeps): Promise<number> {
                 spinner?.stop();
                 throw e;
             }
+        });
+
+    program
+        .command('forward')
+        .description('Forward a task to an execution agent (edits files + runs commands)')
+        .argument('[title]', 'Task title (or omit to be prompted)')
+        .option('--description <text>', 'Task description')
+        .option('--file <path...>', 'Affected file(s) to prioritize (repeatable)')
+        .option('--root <path>', 'Workspace root (default: current directory)')
+        .option('--agent <id>', 'Agent profile id (from .coach/agents.json)', 'default')
+        .option('--no-from-vscode', 'Do not use VS Code user settings for provider/model (coach.*; legacy: codeReviewer.*)')
+        .option('--provider <provider>', 'anthropic|openai|azure|ollama|custom')
+        .option('--api-key <key>', 'Provider API key (prefer env vars in CI)')
+        .option('--api-endpoint <url>', 'Provider endpoint (azure/custom/ollama)')
+        .option('--model <model>', 'Model/deployment name')
+        .option('--policy <policy>', 'conservative|standard|unrestricted (override for this run)')
+        .option('--allow-dangerous', 'Allow dangerous commands (override for this run)')
+        .option('--allow-command <cmd...>', 'Allow exact command(s) for this run')
+        .option('--allow-prefix <prefix...>', 'Allow command prefix(es) for this run')
+        .option('--yes', 'Auto-approve command prompts (requires --policy unrestricted)')
+        .action(async (argTitle: string | undefined, opts: any) => {
+            const rootPath = opts.root ? path.resolve(String(opts.root)) : resolveWorkspaceRoot(process.cwd());
+
+            const baseCfg = ensureWorkspaceAgentsConfigFile(rootPath);
+            const agentId = String(opts.agent || baseCfg.defaultAgentId || 'default');
+            const profile = (baseCfg.agents || []).find((a) => a.id === agentId) || baseCfg.agents?.[0];
+
+            const providerFlagsUsed = Boolean(opts.provider || opts.apiKey || opts.apiEndpoint || opts.model);
+            const agentReviewEnvUsed = Boolean(env.AGENTREVIEW_PROVIDER || env.AGENTREVIEW_API_KEY || env.AGENTREVIEW_API_ENDPOINT || env.AGENTREVIEW_MODEL);
+
+            const providerOverrides =
+                providerFlagsUsed
+                    ? {
+                          provider: {
+                              provider: opts.provider,
+                              apiKey: opts.apiKey,
+                              apiEndpoint: opts.apiEndpoint,
+                              model: opts.model
+                          }
+                      }
+                    : {};
+
+            // Provider resolution: start from CLI/env/config, optionally merge VS Code settings, then agent profile (unless overridden by flags).
+            const { config: reviewCfg } = loadConfig(rootPath, providerOverrides, env);
+
+            if (opts.fromVscode !== false) {
+                const settingsPath = findVscodeSettingsFile(env);
+                if (settingsPath) {
+                    try {
+                        const vs = loadVscodeReviewerAiSettings(settingsPath);
+                        if (vs.provider?.provider) {
+                            if (!providerFlagsUsed && !agentReviewEnvUsed) {
+                                reviewCfg.provider = { ...reviewCfg.provider, ...vs.provider };
+                            }
+                        }
+                    } catch (e) {
+                        // non-fatal
+                        baseLogger.warn('Failed to load VS Code settings; continuing without them', { message: (e as Error).message });
+                    }
+                }
+            }
+
+            const providerCfg = (!providerFlagsUsed && profile?.provider)
+                ? { ...reviewCfg.provider, ...profile.provider }
+                : reviewCfg.provider;
+            const resolvedProvider = resolveProviderConfig(providerCfg, env);
+            if (resolvedProvider.provider === 'anthropic' || resolvedProvider.provider === 'openai') {
+                if (!resolvedProvider.apiKey) {
+                    throw new CoreAgentReviewError(
+                        `${resolvedProvider.provider === 'anthropic' ? 'Anthropic' : 'OpenAI'} API key not configured. Set AGENTREVIEW_API_KEY (or provider-specific env vars), or configure provider/apiKey in .coachrc.json.`,
+                        'CONFIG'
+                    );
+                }
+            }
+            if (resolvedProvider.provider === 'azure') {
+                if (!resolvedProvider.apiKey || !resolvedProvider.apiEndpoint) {
+                    throw new CoreAgentReviewError('Azure OpenAI not configured. Set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT (or AGENTREVIEW_*).', 'CONFIG');
+                }
+            }
+            if (resolvedProvider.provider === 'custom') {
+                if (!resolvedProvider.apiEndpoint) {
+                    throw new CoreAgentReviewError('Custom provider endpoint not configured. Set AGENTREVIEW_API_ENDPOINT or configure it in .coachrc.json.', 'CONFIG');
+                }
+            }
+            const provider = makeProvider(providerCfg, env);
+
+            const isTty = Boolean((process.stdin as any).isTTY);
+            const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: isTty });
+            const prompt = async (q: string) => await new Promise<string>((resolve) => rl.question(q, resolve));
+
+            let title = String(argTitle || '').trim();
+            let description = String(opts.description || '').trim();
+
+            try {
+                if (!title && isTty) title = (await prompt('Task title: ')).trim();
+                if (!description && isTty) description = (await prompt('Task description: ')).trim();
+            } finally {
+                rl.close();
+            }
+
+            const affectedFiles: string[] = Array.isArray(opts.file)
+                ? opts.file
+                      .map((p: string) => path.relative(rootPath, path.resolve(rootPath, p)).replace(/\\/g, '/'))
+                      .filter((p: string) => p && !p.startsWith('../') && p !== '..')
+                : [];
+
+            const runCfg = JSON.parse(JSON.stringify(baseCfg)) as typeof baseCfg;
+            const runExec = runCfg.execution;
+
+            if (opts.policy) {
+                const p = String(opts.policy);
+                if (!['conservative', 'standard', 'unrestricted'].includes(p)) {
+                    throw new CoreAgentReviewError(`Unknown policy: ${p}`, 'CONFIG');
+                }
+                runExec.policy = p as any;
+            }
+            if (opts.allowDangerous) runExec.allowDangerous = true;
+            if (Array.isArray(opts.allowCommand)) runExec.allowedCommands = [...(runExec.allowedCommands || []), ...opts.allowCommand.map(String)];
+            if (Array.isArray(opts.allowPrefix)) runExec.allowedCommandPrefixes = [...(runExec.allowedCommandPrefixes || []), ...opts.allowPrefix.map(String)];
+
+            if (opts.yes && String(runExec.policy) !== 'unrestricted') {
+                throw new CoreAgentReviewError(`--yes requires --policy unrestricted`, 'CONFIG');
+            }
+
+            const approveCommand = async (command: string, reason: string) => {
+                if (opts.yes && String(runExec.policy) !== 'unrestricted') {
+                    return 'deny';
+                }
+                if (!isTty) {
+                    return opts.yes && String(runExec.policy) === 'unrestricted' ? 'allowOnce' : 'deny';
+                }
+
+                io.stderr.write(`\nAgent wants to run:\n  ${command}\nReason: ${reason}\n`);
+                io.stderr.write(`Choose: [1] allow once, [2] always allow (workspace), [3] deny, [4] abort: `);
+
+                const answer = await new Promise<string>((resolve) => {
+                    process.stdin.once('data', (d) => resolve(String(d).trim()));
+                });
+
+                if (answer === '2') return 'allowAlways';
+                if (answer === '3') return 'deny';
+                if (answer === '4') return 'abort';
+                return 'allowOnce';
+            };
+
+            const host = createNodeHost(rootPath, (stream, chunk) => {
+                if (stream === 'stdout') io.stdout.write(chunk);
+                else io.stderr.write(chunk);
+            });
+
+            const agent = createTaskExecutionAgent({
+                provider,
+                host,
+                config: runCfg,
+                agentId,
+                callbacks: {
+                    onProgress: (m) => io.stderr.write(`${m}\n`),
+                    onLog: (m) => io.stderr.write(`${m}\n`),
+                    approveCommand
+                },
+                saveConfig: async (next) => {
+                    // Persist allowlists only; don't silently persist per-run overrides.
+                    const current = loadWorkspaceAgentsConfig(rootPath);
+                    const merged = {
+                        ...current,
+                        execution: {
+                            ...current.execution,
+                            allowedCommands: Array.from(new Set([...(current.execution.allowedCommands || []), ...(next.execution.allowedCommands || [])])),
+                            allowedCommandPrefixes: Array.from(new Set([...(current.execution.allowedCommandPrefixes || []), ...(next.execution.allowedCommandPrefixes || [])]))
+                        }
+                    };
+                    writeWorkspaceAgentsConfig(rootPath, merged);
+                }
+            });
+
+            const finalTitle = title || 'Untitled task';
+            const finalDescription = description || '(none)';
+
+            const result = await agent.execute({
+                title: finalTitle,
+                description: finalDescription,
+                affectedFiles: affectedFiles.length ? affectedFiles : undefined
+            });
+
+            io.stdout.write(`\n${result.ok ? 'OK' : 'FAILED'}: ${result.summary}\n`);
+            if (result.filesChanged.length) {
+                io.stdout.write(`Changed files:\n`);
+                for (const f of result.filesChanged) io.stdout.write(`- ${f}\n`);
+            }
+            if (result.commandsRun.length) {
+                io.stdout.write(`Commands:\n`);
+                for (const c of result.commandsRun) io.stdout.write(`- (exit ${c.exitCode}) ${c.command}\n`);
+            }
+
+            (program as any).__exitCode = result.ok ? 0 : 2;
         });
 
     try {

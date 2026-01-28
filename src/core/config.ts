@@ -4,7 +4,8 @@ import * as path from 'path';
 import { AgentReviewError } from './errors';
 import type { FailOn, Severity } from './model';
 
-export const DEFAULT_CONFIG_FILE = '.agentreviewrc.json';
+export const DEFAULT_CONFIG_FILE = '.coachrc.json';
+export const LEGACY_CONFIG_FILE = '.agentreviewrc.json';
 
 export interface ProviderConfig {
     provider: 'anthropic' | 'openai' | 'azure' | 'ollama' | 'custom';
@@ -91,8 +92,20 @@ function configFromEnv(env: NodeJS.ProcessEnv): Partial<AgentReviewConfig> {
 }
 
 export function findConfigFile(rootPath: string): string | undefined {
-    const candidate = path.join(rootPath, DEFAULT_CONFIG_FILE);
-    return fs.existsSync(candidate) ? candidate : undefined;
+    let cur = path.resolve(rootPath);
+    while (true) {
+        const preferred = path.join(cur, DEFAULT_CONFIG_FILE);
+        if (fs.existsSync(preferred)) return preferred;
+
+        const legacy = path.join(cur, LEGACY_CONFIG_FILE);
+        if (fs.existsSync(legacy)) return legacy;
+
+        const parent = path.dirname(cur);
+        if (parent === cur) break;
+        cur = parent;
+    }
+
+    return undefined;
 }
 
 export function loadConfig(rootPath: string, overrides: CliOverrides = {}, env: NodeJS.ProcessEnv = process.env): LoadedConfig {

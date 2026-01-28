@@ -1,5 +1,5 @@
 // ============================================================================
-// Core Data Types for CodeReviewer AI
+// Core Data Types for Coach
 // ============================================================================
 
 // ---------------------------------------------------------------------------
@@ -106,6 +106,21 @@ export interface HotspotInfo {
     reason: string;
     issueCount: number;
     severity: IssueSeverity;
+}
+
+export interface PureFileSummary {
+    filePath: string;
+    languageId: string;
+    summary: FileSummary;
+    metrics: CodeMetrics;
+}
+
+export interface PureProjectSummary {
+    overview: string;
+    architecture: string;
+    mainModules: Array<{ name: string; path: string; purpose: string }>;
+    techStack: string[];
+    entryPoints: string[];
 }
 
 // ---------------------------------------------------------------------------

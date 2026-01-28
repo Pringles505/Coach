@@ -33,9 +33,9 @@ describe('cli summarize integration', () => {
     });
 
     const code = await runCli(
-      ['node', 'agent-review', 'summarize', filePath, '--format', 'md', '--no-spinner'],
+      ['node', 'coach', 'summarize', filePath, '--format', 'md', '--no-spinner'],
       {
-        tool: { name: 'agent-review', version: '0.0.0' },
+        tool: { name: 'coach', version: '0.0.0' },
         io: cap.io,
         env: process.env,
         createAIProvider: createAIProvider as any,
@@ -55,17 +55,19 @@ describe('cli summarize integration', () => {
       name: 'Mock',
       chat: async (messages: any[]) => {
         const system = String(messages?.[0]?.content || '');
-        if (system.includes('Summarize project structure and health')) {
+        // Pure project summary prompt (no issues/hotspots)
+        if (system.includes('Summarize project structure and architecture')) {
           return JSON.stringify({
             overview: 'Project overview.',
             architecture: 'Architecture.',
             modules: [],
-            recommendations: [],
+            techStack: [],
+            entryPoints: [],
           });
         }
 
+        // Pure file summary (no issues)
         return JSON.stringify({
-          issues: [],
           summary: { purpose: 'x', components: [], dependencies: [], publicApi: [], complexity: 'moderate' },
           metrics: { cognitiveComplexity: 1 },
         });
@@ -73,9 +75,9 @@ describe('cli summarize integration', () => {
     });
 
     const code = await runCli(
-      ['node', 'agent-review', 'summarize', fixtureRoot, '--format', 'md', '--no-spinner'],
+      ['node', 'coach', 'summarize', fixtureRoot, '--format', 'md', '--no-spinner'],
       {
-        tool: { name: 'agent-review', version: '0.0.0' },
+        tool: { name: 'coach', version: '0.0.0' },
         io: cap.io,
         env: process.env,
         createAIProvider: createAIProvider as any,
@@ -84,7 +86,6 @@ describe('cli summarize integration', () => {
 
     expect(code).toBe(0);
     expect(cap.err).toBe('');
-    expect(cap.out).toContain('# Workspace Summary: basic');
+    expect(cap.out).toContain('# Project Summary: basic');
   });
 });
-

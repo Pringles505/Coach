@@ -8,7 +8,7 @@ import { DEFAULT_CONFIG_FILE, loadConfig } from '../../src/core/config';
 
 describe('config loading', () => {
   it('merges defaults < env < config < overrides', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-review-config-'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coach-config-'));
     const cfgPath = path.join(dir, DEFAULT_CONFIG_FILE);
 
     fs.writeFileSync(cfgPath, JSON.stringify({
@@ -33,4 +33,3 @@ describe('config loading', () => {
     expect(config.provider.provider).toBe('openai'); // config file overrides env
   });
 });
-

@@ -186,7 +186,7 @@ export class TaskTreeProvider implements vscode.TreeDataProvider<TaskTreeItem> {
 
         // Command to accept on click
         item.command = {
-            command: 'codeReviewer.acceptSuggestion',
+            command: 'coach.acceptSuggestion',
             title: 'Accept Suggestion',
             arguments: [suggestion.id]
         };

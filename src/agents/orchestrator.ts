@@ -319,8 +319,9 @@ export class AgentOrchestrator {
     }
 
     private async findAnalyzableFiles(rootUri: vscode.Uri): Promise<vscode.Uri[]> {
-        const config = vscode.workspace.getConfiguration('codeReviewer');
-        const excludePatterns = config.get<string[]>('excludePatterns') || [];
+        const config = vscode.workspace.getConfiguration('coach');
+        const legacy = vscode.workspace.getConfiguration('codeReviewerAi');
+        const excludePatterns = config.get<string[]>('excludePatterns') ?? legacy.get<string[]>('excludePatterns') ?? [];
 
         const pattern = '**/*.{ts,tsx,js,jsx,py,java,cs,go,rs,cpp,c,rb,php,swift,kt}';
         const exclude = `{${excludePatterns.join(',')}}`;
@@ -336,7 +337,7 @@ export class AgentOrchestrator {
 
         // Log summary for debugging
         const summary = await SmartFileFilter.getWorkspaceSummary(rootUri);
-        console.log(`[CodeReviewer] File analysis summary:`);
+        console.log(`[Coach] File analysis summary:`);
         console.log(`  Total files: ${summary.total}`);
         console.log(`  Core files: ${summary.byRelevance[FileRelevance.Core]}`);
         console.log(`  Supporting: ${summary.byRelevance[FileRelevance.Supporting]}`);
@@ -369,14 +370,15 @@ export class AgentOrchestrator {
     }
 
     private getUserPreferences() {
-        const config = vscode.workspace.getConfiguration('codeReviewer');
+        const config = vscode.workspace.getConfiguration('coach');
+        const legacy = vscode.workspace.getConfiguration('codeReviewerAi');
         return {
-            workHoursStart: config.get<number>('workHoursStart') || 9,
-            workHoursEnd: config.get<number>('workHoursEnd') || 17,
-            focusSessionDuration: config.get<number>('focusSessionDuration') || 90,
+            workHoursStart: config.get<number>('workHoursStart') ?? legacy.get<number>('workHoursStart') ?? 9,
+            workHoursEnd: config.get<number>('workHoursEnd') ?? legacy.get<number>('workHoursEnd') ?? 17,
+            focusSessionDuration: config.get<number>('focusSessionDuration') ?? legacy.get<number>('focusSessionDuration') ?? 90,
             preferredTaskTypes: [],
-            excludePatterns: config.get<string[]>('excludePatterns') || [],
-            analysisDepth: config.get<'light' | 'moderate' | 'deep'>('analysisDepth') || 'moderate'
+            excludePatterns: config.get<string[]>('excludePatterns') ?? legacy.get<string[]>('excludePatterns') ?? [],
+            analysisDepth: config.get<'light' | 'moderate' | 'deep'>('analysisDepth') ?? legacy.get<'light' | 'moderate' | 'deep'>('analysisDepth') ?? 'moderate'
         };
     }
 }

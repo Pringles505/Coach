@@ -78,7 +78,7 @@ function toFinding(rootPath: string, issue: any): Finding {
         title: String(issue.title || 'Issue'),
         message: String(issue.description || ''),
         suggestion: issue.suggestion ? String(issue.suggestion) : undefined,
-        ruleId: String(issue.category || 'agent-review'),
+        ruleId: String(issue.category || 'coach'),
         confidence: typeof issue.confidence === 'number' ? issue.confidence : undefined
     };
 }

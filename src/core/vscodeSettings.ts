@@ -6,7 +6,7 @@ import { parse as parseJsonc } from 'jsonc-parser';
 
 import type { AgentReviewConfig, ProviderConfig } from './config';
 
-export interface VscodeReviewerSettings {
+export interface VscodeReviewerAiSettings {
     provider?: ProviderConfig;
     analysisDepth?: AgentReviewConfig['analysisDepth'];
     exclude?: string[];
@@ -16,17 +16,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function parseVscodeSettingsJson(jsonText: string): VscodeReviewerSettings {
+export function parseVscodeSettingsJson(jsonText: string): VscodeReviewerAiSettings {
     const parsed = parseJsonc(jsonText) as unknown;
     if (!isPlainObject(parsed)) return {};
 
     const get = (key: string): unknown => (parsed as any)[key];
-    const aiProvider = get('codeReviewer.aiProvider');
-    const apiKey = get('codeReviewer.apiKey');
-    const apiEndpoint = get('codeReviewer.apiEndpoint');
-    const model = get('codeReviewer.model');
-    const analysisDepth = get('codeReviewer.analysisDepth');
-    const excludePatterns = get('codeReviewer.excludePatterns');
+    const getEither = (newKey: string, oldKey: string): unknown => {
+        const v = get(newKey);
+        return v !== undefined ? v : get(oldKey);
+    };
+
+    // Prefer new `coach.*` settings, but fall back to legacy `codeReviewerAi.*` for compatibility.
+    const aiProvider = getEither('coach.aiProvider', 'codeReviewerAi.aiProvider');
+    const apiKey = getEither('coach.apiKey', 'codeReviewerAi.apiKey');
+    const apiEndpoint = getEither('coach.apiEndpoint', 'codeReviewerAi.apiEndpoint');
+    const model = getEither('coach.model', 'codeReviewerAi.model');
+    const analysisDepth = getEither('coach.analysisDepth', 'codeReviewerAi.analysisDepth');
+    const excludePatterns = getEither('coach.excludePatterns', 'codeReviewerAi.excludePatterns');
 
     const provider: ProviderConfig | undefined =
         typeof aiProvider === 'string'
@@ -85,7 +91,7 @@ export function findVscodeSettingsFile(env: NodeJS.ProcessEnv = process.env): st
     return undefined;
 }
 
-export function loadVscodeReviewerSettings(settingsPath: string): VscodeReviewerSettings {
+export function loadVscodeReviewerAiSettings(settingsPath: string): VscodeReviewerAiSettings {
     const raw = fs.readFileSync(settingsPath, 'utf8');
     return parseVscodeSettingsJson(raw);
 }

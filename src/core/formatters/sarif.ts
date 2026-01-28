@@ -46,7 +46,7 @@ function toSarifLocation(rootPath: string, f: Finding): SarifLog['runs'][0]['res
 export function formatSarif(result: RunResult): string {
     const rulesMap = new Map<string, { id: string; name?: string; shortDescription?: { text: string } }>();
     for (const f of result.findings) {
-        const id = f.ruleId || f.category || 'agent-review';
+        const id = f.ruleId || f.category || 'coach';
         if (!rulesMap.has(id)) {
             rulesMap.set(id, { id, name: f.category, shortDescription: { text: f.title } });
         }
@@ -78,4 +78,3 @@ export function formatSarif(result: RunResult): string {
 
     return JSON.stringify(log, null, 2) + '\n';
 }
-

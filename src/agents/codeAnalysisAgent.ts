@@ -13,7 +13,9 @@ import {
     IssueCategory,
     ProjectSummary,
     ModuleInfo,
-    HotspotInfo
+    HotspotInfo,
+    PureFileSummary,
+    PureProjectSummary
 } from '../types';
 
 /**
@@ -93,6 +95,167 @@ export class CodeAnalysisAgent {
         });
 
         return this.parseProjectSummary(response, fileAnalyses);
+    }
+
+    /**
+     * Pure summarization - describes functionality without finding issues
+     */
+    async summarizeOnly(
+        document: TextDocumentLike,
+        context: AgentContext
+    ): Promise<PureFileSummary> {
+        const code = document.getText();
+        const filePath = document.uri.fsPath;
+        const languageId = document.languageId;
+
+        // Compute basic metrics locally (fast)
+        const metrics = this.computeMetrics(code);
+
+        // Request AI summary (no issues)
+        const aiSummary = await this.requestAISummary(
+            code,
+            filePath,
+            languageId
+        );
+
+        return {
+            filePath,
+            languageId,
+            summary: aiSummary.summary,
+            metrics: { ...metrics, ...aiSummary.additionalMetrics }
+        };
+    }
+
+    /**
+     * Generate a project-level summary without issues/hotspots
+     */
+    async summarizeProjectOnly(
+        fileSummaries: Map<string, PureFileSummary>
+    ): Promise<PureProjectSummary> {
+        const summaryData = Array.from(fileSummaries.entries()).map(([filePath, summary]) => ({
+            path: filePath,
+            purpose: summary.summary.purpose,
+            components: summary.summary.mainComponents,
+            dependencies: summary.summary.dependencies,
+            complexity: summary.summary.complexity
+        }));
+
+        const messages: AgentMessage[] = [
+            { role: 'system', content: PROMPTS.PURE_PROJECT_SUMMARY_SYSTEM },
+            {
+                role: 'user',
+                content: PROMPTS.PURE_PROJECT_SUMMARY_USER.replace(
+                    '{{ANALYSIS_DATA}}',
+                    JSON.stringify(summaryData, null, 2)
+                )
+            }
+        ];
+
+        const response = await this.aiService.chat(messages, {
+            temperature: 0.3,
+            maxTokens: 2000
+        });
+
+        return this.parsePureProjectSummary(response);
+    }
+
+    /**
+     * Format pure file summary as readable markdown (no issues section)
+     */
+    formatPureSummary(summary: PureFileSummary): string {
+        const { summary: fileSummary, metrics } = summary;
+
+        let markdown = `# File Summary: ${summary.filePath.split(/[\\/]/).pop()}\n\n`;
+
+        markdown += `## Purpose\n${fileSummary.purpose}\n\n`;
+
+        markdown += `## Main Components\n`;
+        for (const component of fileSummary.mainComponents) {
+            markdown += `- ${component}\n`;
+        }
+        markdown += '\n';
+
+        if (fileSummary.dependencies.length > 0) {
+            markdown += `## Dependencies\n`;
+            for (const dep of fileSummary.dependencies) {
+                markdown += `- ${dep}\n`;
+            }
+            markdown += '\n';
+        }
+
+        if (fileSummary.publicApi.length > 0) {
+            markdown += `## Public API\n`;
+            for (const api of fileSummary.publicApi) {
+                markdown += `- ${api}\n`;
+            }
+            markdown += '\n';
+        }
+
+        markdown += `## Metrics\n`;
+        markdown += `| Metric | Value |\n|--------|-------|\n`;
+        markdown += `| Lines of Code | ${metrics.linesOfCode} |\n`;
+        markdown += `| Cyclomatic Complexity | ${metrics.cyclomaticComplexity} |\n`;
+        markdown += `| Maintainability Index | ${metrics.maintainabilityIndex} |\n`;
+        markdown += `| Complexity Level | ${fileSummary.complexity} |\n`;
+
+        return markdown;
+    }
+
+    /**
+     * Format pure project summary as readable markdown (no hotspots/recommendations)
+     */
+    formatPureProjectSummary(
+        summary: PureProjectSummary,
+        options?: { rootPath?: string; analyzedAt?: Date; filesAnalyzed?: number }
+    ): string {
+        const workspaceName = options?.rootPath
+            ? options.rootPath.split(/[\\/]/).filter(Boolean).pop()
+            : 'Workspace';
+
+        let markdown = `# Project Summary: ${workspaceName}\n\n`;
+
+        if (options?.filesAnalyzed !== undefined || options?.analyzedAt) {
+            markdown += `## Stats\n`;
+            if (options?.filesAnalyzed !== undefined) {
+                markdown += `- Files analyzed: ${options.filesAnalyzed}\n`;
+            }
+            if (options?.analyzedAt) {
+                markdown += `- Updated: ${options.analyzedAt.toLocaleString()}\n`;
+            }
+            markdown += `\n`;
+        }
+
+        markdown += `## Overview\n${summary.overview}\n\n`;
+        markdown += `## Architecture\n${summary.architecture}\n\n`;
+
+        markdown += `## Main Modules\n`;
+        if (!summary.mainModules || summary.mainModules.length === 0) {
+            markdown += `No modules identified.\n\n`;
+        } else {
+            for (const module of summary.mainModules) {
+                markdown += `### ${module.name}\n`;
+                markdown += `- Path: ${module.path}\n`;
+                markdown += `- Purpose: ${module.purpose}\n\n`;
+            }
+        }
+
+        if (summary.techStack && summary.techStack.length > 0) {
+            markdown += `## Tech Stack\n`;
+            for (const tech of summary.techStack) {
+                markdown += `- ${tech}\n`;
+            }
+            markdown += '\n';
+        }
+
+        if (summary.entryPoints && summary.entryPoints.length > 0) {
+            markdown += `## Entry Points\n`;
+            for (const entry of summary.entryPoints) {
+                markdown += `- ${entry}\n`;
+            }
+            markdown += '\n';
+        }
+
+        return markdown;
     }
 
     /**
@@ -236,6 +399,104 @@ export class CodeAnalysisAgent {
         });
 
         return this.parseAnalysisResponse(response, filePath);
+    }
+
+    private async requestAISummary(
+        code: string,
+        filePath: string,
+        languageId: string
+    ): Promise<{
+        summary: FileSummary;
+        additionalMetrics: Partial<CodeMetrics>;
+    }> {
+        const fileName = filePath.split(/[\\/]/).pop() || 'unknown';
+
+        const messages: AgentMessage[] = [
+            { role: 'system', content: PROMPTS.FILE_SUMMARY_SYSTEM },
+            {
+                role: 'user',
+                content: PROMPTS.FILE_SUMMARY_USER
+                    .replace('{{FILE_NAME}}', fileName)
+                    .replace(/\{\{LANGUAGE\}\}/g, languageId)
+                    .replace('{{CODE}}', this.addLineNumbers(this.truncateCode(code, 15000)))
+            }
+        ];
+
+        const response = await this.aiService.chat(messages, {
+            temperature: 0.2,
+            maxTokens: 2000
+        });
+
+        return this.parseSummaryResponse(response);
+    }
+
+    private parseSummaryResponse(
+        response: string
+    ): {
+        summary: FileSummary;
+        additionalMetrics: Partial<CodeMetrics>;
+    } {
+        try {
+            const jsonMatch = response.match(/```json\n?([\s\S]*?)\n?```/);
+            const jsonStr = jsonMatch ? jsonMatch[1] : response;
+            const parsed = JSON.parse(jsonStr);
+
+            const summary: FileSummary = {
+                purpose: parsed.summary?.purpose || 'No summary available',
+                mainComponents: parsed.summary?.components || [],
+                dependencies: parsed.summary?.dependencies || [],
+                publicApi: parsed.summary?.publicApi || [],
+                complexity: parsed.summary?.complexity || 'moderate'
+            };
+
+            return {
+                summary,
+                additionalMetrics: {
+                    cognitiveComplexity: parsed.metrics?.cognitiveComplexity
+                }
+            };
+        } catch (error) {
+            console.error('Failed to parse AI summary response:', error);
+            return {
+                summary: {
+                    purpose: 'Summary failed - could not parse response',
+                    mainComponents: [],
+                    dependencies: [],
+                    publicApi: [],
+                    complexity: 'moderate'
+                },
+                additionalMetrics: {}
+            };
+        }
+    }
+
+    private parsePureProjectSummary(response: string): PureProjectSummary {
+        try {
+            const jsonMatch = response.match(/```json\n?([\s\S]*?)\n?```/);
+            const jsonStr = jsonMatch ? jsonMatch[1] : response;
+            const parsed = JSON.parse(jsonStr);
+
+            return {
+                overview: parsed.overview || 'No overview available',
+                architecture: parsed.architecture || '',
+                mainModules: (parsed.modules || []).map((m: any) => ({
+                    name: m.name || '',
+                    path: m.path || '',
+                    purpose: m.purpose || ''
+                })),
+                techStack: parsed.techStack || [],
+                entryPoints: parsed.entryPoints || []
+            };
+        } catch (error) {
+            console.error('Failed to parse pure project summary:', error);
+            return {
+                overview: 'Summary complete',
+                architecture: '',
+                mainModules: [],
+                techStack: [],
+                entryPoints: []
+            };
+        }
     }
 
     private parseAnalysisResponse(

@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
     Task,
     TaskStatus,
@@ -17,12 +19,17 @@ import {
 export class TaskManager {
     private tasks: Map<string, Task> = new Map();
     private readonly STORAGE_KEY = 'codeReviewer.tasks';
+    private workspaceRoot?: string;
+    private tasksFilePath?: string;
+    private _lastWriteTime = 0;
+    private _suppressExternalReload = false;
 
     private _onTasksChanged = new vscode.EventEmitter<void>();
     readonly onTasksChanged = this._onTasksChanged.event;
 
-    constructor(private storage: vscode.Memento) {
-        this.loadFromStorage();
+    constructor(private storage: vscode.Memento, workspaceRoot?: string) {
+        this.setWorkspaceRoot(workspaceRoot);
+        this.loadFromPersistence();
     }
 
     // =========================================================================
@@ -398,7 +405,54 @@ export class TaskManager {
     // Private Methods
     // =========================================================================
 
-    private async loadFromStorage(): Promise<void> {
+    setWorkspaceRoot(workspaceRoot?: string): void {
+        const nextRoot = workspaceRoot || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        this.workspaceRoot = nextRoot;
+        this.tasksFilePath = nextRoot ? path.join(nextRoot, '.coach', 'tasks.json') : undefined;
+    }
+
+    /**
+     * Reload tasks from the workspace `.coach/tasks.json` file if available,
+     * otherwise fall back to VS Code storage.
+     *
+     * @param force - If true, reload even if a recent write was made by this instance
+     */
+    reloadFromDisk(force = false): void {
+        // Suppress reload if we just wrote the file (within 1 second)
+        // This prevents unnecessary reloads when our own writes trigger the file watcher
+        if (!force && this._suppressExternalReload) {
+            const timeSinceWrite = Date.now() - this._lastWriteTime;
+            if (timeSinceWrite < 1000) {
+                return;
+            }
+            this._suppressExternalReload = false;
+        }
+
+        this.tasks.clear();
+        this.loadFromPersistence();
+        this._onTasksChanged.fire();
+    }
+
+    private loadFromPersistence(): void {
+        // Prefer workspace file for CLI/extension sync.
+        if (this.tasksFilePath && fs.existsSync(this.tasksFilePath)) {
+            try {
+                const raw = fs.readFileSync(this.tasksFilePath, 'utf8');
+                const parsed = JSON.parse(raw) as any;
+                const list = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+                for (const data of list) {
+                    const task = this.deserializeTask(data);
+                    if (task) this.tasks.set(task.id, task);
+                }
+                // Mirror into storage for back-compat/backup.
+                void this.mirrorToStorage();
+                return;
+            } catch (error) {
+                console.error('Failed to load tasks from .coach/tasks.json:', error);
+                // Fall back to storage.
+            }
+        }
+
         try {
             const stored = this.storage.get<Record<string, unknown>>(this.STORAGE_KEY);
 
@@ -413,6 +467,23 @@ export class TaskManager {
         } catch (error) {
             console.error('Failed to load tasks:', error);
         }
+
+        // If we loaded from storage but have a workspace file path, migrate to disk for CLI sync.
+        if (this.tasksFilePath && !fs.existsSync(this.tasksFilePath) && this.tasks.size > 0) {
+            void this.saveToStorage();
+        }
+    }
+
+    private async mirrorToStorage(): Promise<void> {
+        try {
+            const serialized: Record<string, unknown> = {};
+            for (const [id, task] of this.tasks) {
+                serialized[id] = this.serializeTask(task);
+            }
+            await this.storage.update(this.STORAGE_KEY, serialized);
+        } catch (error) {
+            console.error('Failed to mirror tasks to storage:', error);
+        }
     }
 
     private async saveToStorage(): Promise<void> {
@@ -424,6 +495,30 @@ export class TaskManager {
             }
 
             await this.storage.update(this.STORAGE_KEY, serialized);
+
+            if (this.tasksFilePath) {
+                const dir = path.dirname(this.tasksFilePath);
+                fs.mkdirSync(dir, { recursive: true });
+
+                let suggestions: unknown[] = [];
+                try {
+                    if (fs.existsSync(this.tasksFilePath)) {
+                        const existing = JSON.parse(fs.readFileSync(this.tasksFilePath, 'utf8'));
+                        if (Array.isArray((existing as any)?.suggestions)) suggestions = (existing as any).suggestions;
+                    }
+                } catch {
+                    // ignore parse errors; we'll overwrite with tasks-only
+                }
+
+                const tasks = Array.from(this.tasks.values()).map((t) => this.serializeTask(t));
+                const fileObj = { version: 1, tasks, suggestions };
+
+                // Mark that we're about to write, so the file watcher doesn't trigger a reload
+                this._suppressExternalReload = true;
+                this._lastWriteTime = Date.now();
+
+                fs.writeFileSync(this.tasksFilePath, JSON.stringify(fileObj, null, 2) + '\n', 'utf8');
+            }
         } catch (error) {
             console.error('Failed to save tasks:', error);
         }

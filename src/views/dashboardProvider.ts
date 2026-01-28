@@ -14,7 +14,7 @@ import {
  * DashboardProvider renders the main dashboard with code health overview
  */
 export class DashboardProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'codeReviewer.dashboard';
+    public static readonly viewType = 'coach.dashboard';
 
     private _view?: vscode.WebviewView;
     private suggestionSubscription?: vscode.Disposable;
@@ -68,16 +68,16 @@ export class DashboardProvider implements vscode.WebviewViewProvider {
         webviewView.webview.onDidReceiveMessage(async (message) => {
             switch (message.command) {
                 case 'analyzeWorkspace':
-                    vscode.commands.executeCommand('codeReviewer.analyzeWorkspace');
+                    vscode.commands.executeCommand('coach.analyzeWorkspace');
                     break;
                 case 'analyzeFile':
-                    vscode.commands.executeCommand('codeReviewer.analyzeFile');
+                    vscode.commands.executeCommand('coach.analyzeFile');
                     break;
                 case 'summarizeFile':
-                    vscode.commands.executeCommand('codeReviewer.summarizeFile');
+                    vscode.commands.executeCommand('coach.summarizeFile');
                     break;
                 case 'summarizeWorkspace':
-                    vscode.commands.executeCommand('codeReviewer.summarizeWorkspace');
+                    vscode.commands.executeCommand('coach.summarizeWorkspace');
                     break;
                 case 'openFile':
                     const doc = await vscode.workspace.openTextDocument(message.path);

@@ -7,28 +7,39 @@ export class ConfigManager {
     private config: vscode.WorkspaceConfiguration;
 
     constructor() {
-        this.config = vscode.workspace.getConfiguration('codeReviewer');
+        this.config = vscode.workspace.getConfiguration('coach');
     }
 
     /**
      * Reload configuration (call after configuration changes)
      */
     reload(): void {
-        this.config = vscode.workspace.getConfiguration('codeReviewer');
+        this.config = vscode.workspace.getConfiguration('coach');
     }
 
     /**
      * Get a configuration value
      */
     get<T>(key: string): T | undefined {
-        return this.config.get<T>(key);
+        const value = this.config.get<T>(key);
+        if (value !== undefined) return value;
+
+        // Back-compat: old extension/settings used the `codeReviewerAi.*` namespace.
+        return vscode.workspace.getConfiguration('codeReviewerAi').get<T>(key);
     }
 
     /**
      * Get a configuration value with default
      */
     getWithDefault<T>(key: string, defaultValue: T): T {
-        return this.config.get<T>(key) ?? defaultValue;
+        const value = this.config.get<T>(key);
+        if (value !== undefined) return value;
+
+        // Back-compat: old extension/settings used the `codeReviewerAi.*` namespace.
+        const legacyValue = vscode.workspace.getConfiguration('codeReviewerAi').get<T>(key);
+        if (legacyValue !== undefined) return legacyValue;
+
+        return defaultValue;
     }
 
     /**

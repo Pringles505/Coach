@@ -21,6 +21,9 @@ out/
 .DS_Store
 Thumbs.db
 
+# Windows reserved device filename (cannot be added to git on Windows)
+nul
+
 # Logs
 *.log
 npm-debug.log*
@@ -28,6 +31,10 @@ npm-debug.log*
 # Environment
 .env
 .env.local
+
+# Coach config (may contain API keys)
+.coachrc.json
+.coach/
 
 # Test coverage
 coverage/

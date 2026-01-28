@@ -7,7 +7,7 @@ import { Task, TaskStatus, TaskType, CalendarEvent } from '../types';
  * Shows accepted/scheduled tasks.
  */
 export class CalendarProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'codeReviewer.calendar';
+    public static readonly viewType = 'coach.calendar';
 
     private _view?: vscode.WebviewView;
 

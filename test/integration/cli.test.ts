@@ -43,9 +43,9 @@ describe('cli integration', () => {
     });
 
     const code = await runCli(
-      ['node', 'agent-review', 'review', fixtureRoot, '--format', 'json', '--fail-on', 'warning', '--max-findings', '5'],
+      ['node', 'coach', 'review', fixtureRoot, '--format', 'json', '--fail-on', 'warning', '--max-findings', '5'],
       {
-        tool: { name: 'agent-review', version: '0.0.0' },
+        tool: { name: 'coach', version: '0.0.0' },
         io: cap.io,
         env: process.env,
         createAIProvider: createAIProvider as any,

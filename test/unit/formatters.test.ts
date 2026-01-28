@@ -23,7 +23,7 @@ const sample: RunResult = {
     endedAt: new Date(1).toISOString(),
     durationMs: 1,
     filesAnalyzed: 1,
-    tool: { name: 'agent-review', version: '0.0.0' },
+    tool: { name: 'coach', version: '0.0.0' },
     selection: { mode: 'path', targetPath: '/repo' },
   },
 };
@@ -49,4 +49,3 @@ describe('formatters', () => {
     expect(out).toContain('| Severity | File | Line | Title |');
   });
 });
-

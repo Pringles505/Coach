@@ -11,108 +11,140 @@ import { AnalysisCache } from './cache/analysisCache';
 import { AIServiceFactory } from './ai/aiServiceFactory';
 import { ConfigManager } from './config/configManager';
 import { SuggestionManager } from './suggestions/suggestionManager';
-import { TaskPriority } from './types';
+import { TaskPriority, TaskStatus } from './types';
+import { createAIProvider } from './core/ai/createProvider';
+import { createNodeHost } from './core/agentExecution/nodeHost';
+import { createTaskExecutionAgent } from './core/agentExecution/taskExecutionAgent';
+import { ensureWorkspaceAgentsConfigFile, loadWorkspaceAgentsConfig, writeWorkspaceAgentsConfig } from './core/agentExecution/workspaceConfig';
 
 let orchestrator: AgentOrchestrator;
 let taskManager: TaskManager;
 let annotationController: InlineAnnotationController;
 let analysisCache: AnalysisCache;
 let suggestionManager: SuggestionManager;
+let isActivated = false;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-    console.log('CodeReviewer AI is activating...');
+    if (isActivated) return;
+    isActivated = true;
+    console.log('Coach is activating...');
 
-    // Initialize core services
-    const configManager = new ConfigManager();
-    const aiService = AIServiceFactory.create(configManager);
-    let currentWorkspaceKey = getWorkspaceKey();
-    // Use workspaceState so analysis/tasks are scoped per workspace (project) by default.
-    analysisCache = new AnalysisCache(context.workspaceState, currentWorkspaceKey);
-    taskManager = new TaskManager(context.workspaceState);
-    suggestionManager = new SuggestionManager(context.workspaceState, currentWorkspaceKey);
-
-    // Initialize agent orchestrator
-    orchestrator = new AgentOrchestrator(aiService, analysisCache, taskManager);
-
-    // Initialize UI providers
-    const dashboardProvider = new DashboardProvider(context.extensionUri, taskManager, analysisCache, suggestionManager);
-    const calendarProvider = new CalendarProvider(context.extensionUri, taskManager);
-    const taskPanelProvider = new TaskPanelProvider(context.extensionUri, taskManager, suggestionManager);
-    const codeHealthProvider = new CodeHealthProvider(analysisCache);
-    annotationController = new InlineAnnotationController(analysisCache);
-
-    const switchWorkspaceScope = (): void => {
-        const nextKey = getWorkspaceKey();
-        if (nextKey === currentWorkspaceKey) return;
-
-        currentWorkspaceKey = nextKey;
+    const activationDisposables: vscode.Disposable[] = [];
+    try {
+        // Initialize core services
+        const configManager = new ConfigManager();
+        const aiService = AIServiceFactory.create(configManager);
+        let currentWorkspaceKey = getWorkspaceKey();
+        // Use workspaceState so analysis/tasks are scoped per workspace (project) by default.
         analysisCache = new AnalysisCache(context.workspaceState, currentWorkspaceKey);
+        taskManager = new TaskManager(context.workspaceState, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
         suggestionManager = new SuggestionManager(context.workspaceState, currentWorkspaceKey);
 
-        orchestrator.setAnalysisCache(analysisCache);
-        dashboardProvider.setAnalysisCache(analysisCache);
-        dashboardProvider.setSuggestionManager(suggestionManager);
-        codeHealthProvider.setAnalysisCache(analysisCache);
-        annotationController.setAnalysisCache(analysisCache);
-        taskPanelProvider.setSuggestionManager(suggestionManager);
-    };
-
-    // Register webview providers
-    context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider('codeReviewer.dashboard', dashboardProvider),
-        vscode.window.registerWebviewViewProvider('codeReviewer.tasks', taskPanelProvider),
-        vscode.window.registerWebviewViewProvider('codeReviewer.calendar', calendarProvider)
-    );
-
-    // Register tree data providers
-    context.subscriptions.push(
-        vscode.window.registerTreeDataProvider('codeReviewer.codeHealth', codeHealthProvider)
-    );
-
-    // Register commands
-    registerCommands(context, orchestrator, taskManager, dashboardProvider, calendarProvider, taskPanelProvider, configManager, suggestionManager);
-
-    // Setup file watchers for auto-analysis
-    setupFileWatchers(context, orchestrator, configManager);
-
-    // Initialize inline annotations
-    if (configManager.get<boolean>('inlineAnnotations')) {
-        annotationController.activate(context);
-    }
-
-    // If we were activated before workspace folders were ready (or the user opens/changing folders),
-    // re-scope analysis state so issues don't bleed across projects.
-    context.subscriptions.push(
-        vscode.workspace.onDidChangeWorkspaceFolders(() => switchWorkspaceScope())
-    );
-
-    // In some startup sequences (especially starting with an empty window, or slow folder restore),
-    // workspaceFolders can become available after activation without a folder-change event.
-    // Poll briefly to ensure we leave "global" scope once the workspace is known.
-    let attempts = 0;
-    const interval = setInterval(() => {
-        attempts++;
-        switchWorkspaceScope();
-        if (attempts >= 10) {
-            clearInterval(interval);
-        }
-    }, 500);
-    context.subscriptions.push(new vscode.Disposable(() => clearInterval(interval)));
-
-    // Listen for configuration changes
-    context.subscriptions.push(
-        vscode.workspace.onDidChangeConfiguration(e => {
-            if (e.affectsConfiguration('codeReviewer')) {
-                handleConfigChange(configManager, annotationController, context);
+        let tasksWatcher: vscode.FileSystemWatcher | undefined;
+        let reloadDebounceTimer: ReturnType<typeof setTimeout> | undefined;
+        const debouncedReload = () => {
+            if (reloadDebounceTimer) clearTimeout(reloadDebounceTimer);
+            reloadDebounceTimer = setTimeout(() => {
+                taskManager.reloadFromDisk();
+            }, 100);
+        };
+        const refreshTasksWatcher = () => {
+            try { tasksWatcher?.dispose(); } catch { /* ignore */ }
+            const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+            if (!root) {
+                tasksWatcher = undefined;
+                return;
             }
-        })
-    );
+            tasksWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '.coach/tasks.json'));
+            tasksWatcher.onDidChange(() => debouncedReload());
+            tasksWatcher.onDidCreate(() => debouncedReload());
+            tasksWatcher.onDidDelete(() => debouncedReload());
+            activationDisposables.push(tasksWatcher);
+        };
+        refreshTasksWatcher();
 
-    console.log('CodeReviewer AI activated successfully');
+        // Initialize agent orchestrator
+        orchestrator = new AgentOrchestrator(aiService, analysisCache, taskManager);
+
+        // Initialize UI providers
+        const dashboardProvider = new DashboardProvider(context.extensionUri, taskManager, analysisCache, suggestionManager);
+        const calendarProvider = new CalendarProvider(context.extensionUri, taskManager);
+        const taskPanelProvider = new TaskPanelProvider(context.extensionUri, taskManager, suggestionManager);
+        const codeHealthProvider = new CodeHealthProvider(analysisCache);
+        annotationController = new InlineAnnotationController(analysisCache);
+
+        const switchWorkspaceScope = (): void => {
+            const nextKey = getWorkspaceKey();
+            if (nextKey === currentWorkspaceKey) return;
+
+            currentWorkspaceKey = nextKey;
+            analysisCache = new AnalysisCache(context.workspaceState, currentWorkspaceKey);
+            suggestionManager = new SuggestionManager(context.workspaceState, currentWorkspaceKey);
+            taskManager.setWorkspaceRoot(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+            refreshTasksWatcher();
+
+            orchestrator.setAnalysisCache(analysisCache);
+            dashboardProvider.setAnalysisCache(analysisCache);
+            dashboardProvider.setSuggestionManager(suggestionManager);
+            codeHealthProvider.setAnalysisCache(analysisCache);
+            annotationController.setAnalysisCache(analysisCache);
+            taskPanelProvider.setSuggestionManager(suggestionManager);
+        };
+
+        activationDisposables.push(
+            vscode.window.registerWebviewViewProvider('coach.dashboard', dashboardProvider),
+            vscode.window.registerWebviewViewProvider('coach.tasks', taskPanelProvider),
+            vscode.window.registerWebviewViewProvider('coach.calendar', calendarProvider),
+            vscode.window.registerTreeDataProvider('coach.codeHealth', codeHealthProvider)
+        );
+
+        // Register commands + watchers into activationDisposables so we can roll them back on activation errors.
+        registerCommands(activationDisposables, orchestrator, taskManager, dashboardProvider, calendarProvider, taskPanelProvider, configManager, suggestionManager);
+        setupFileWatchers(activationDisposables, orchestrator, configManager);
+
+        // Initialize inline annotations
+        if (configManager.get<boolean>('inlineAnnotations')) {
+            annotationController.activate();
+        }
+
+        activationDisposables.push(
+            vscode.workspace.onDidChangeWorkspaceFolders(() => switchWorkspaceScope())
+        );
+
+        // In some startup sequences (especially starting with an empty window, or slow folder restore),
+        // workspaceFolders can become available after activation without a folder-change event.
+        // Poll briefly to ensure we leave "global" scope once the workspace is known.
+        let attempts = 0;
+        const interval = setInterval(() => {
+            attempts++;
+            switchWorkspaceScope();
+            if (attempts >= 10) {
+                clearInterval(interval);
+            }
+        }, 500);
+        activationDisposables.push(new vscode.Disposable(() => clearInterval(interval)));
+
+        activationDisposables.push(
+            vscode.workspace.onDidChangeConfiguration(e => {
+                if (e.affectsConfiguration('coach') || e.affectsConfiguration('codeReviewerAi')) {
+                    handleConfigChange(configManager, annotationController);
+                }
+            })
+        );
+
+        context.subscriptions.push(...activationDisposables);
+        console.log('Coach activated successfully');
+    } catch (e) {
+        for (const d of activationDisposables) {
+            try { d.dispose(); } catch { /* ignore */ }
+        }
+        isActivated = false;
+        throw e;
+    }
 }
 
 function registerCommands(
-    context: vscode.ExtensionContext,
+    subscriptions: vscode.Disposable[],
     orchestrator: AgentOrchestrator,
     taskManager: TaskManager,
     dashboardProvider: DashboardProvider,
@@ -122,8 +154,8 @@ function registerCommands(
     suggestionManager: SuggestionManager
 ): void {
     // Analysis commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.analyzeFile', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.analyzeFile', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
                 vscode.window.showWarningMessage('No active file to analyze');
@@ -133,14 +165,14 @@ function registerCommands(
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.analyzeWorkspace', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.analyzeWorkspace', async () => {
             await analyzeWorkspaceWithProgress(orchestrator, dashboardProvider);
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.summarizeFile', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.summarizeFile', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
                 vscode.window.showWarningMessage('No active file to summarize');
@@ -150,14 +182,14 @@ function registerCommands(
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.summarizeWorkspace', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.summarizeWorkspace', async () => {
             await summarizeWorkspaceWithProgress(orchestrator, dashboardProvider);
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.generateRefactorPlan', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.generateRefactorPlan', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
                 vscode.window.showWarningMessage('No active file for refactor planning');
@@ -167,8 +199,8 @@ function registerCommands(
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.generateTests', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.generateTests', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor || editor.selection.isEmpty) {
                 vscode.window.showWarningMessage('Select code to generate tests');
@@ -179,8 +211,8 @@ function registerCommands(
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.scheduleModuleFixes', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.scheduleModuleFixes', async () => {
             const editor = vscode.window.activeTextEditor;
             if (!editor) {
                 vscode.window.showWarningMessage('No active file');
@@ -191,70 +223,83 @@ function registerCommands(
     );
 
     // View commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.openCalendar', () => {
-            vscode.commands.executeCommand('codeReviewer.calendar.focus');
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.openCalendar', () => {
+            vscode.commands.executeCommand('coach.calendar.focus');
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.openDashboard', () => {
-            vscode.commands.executeCommand('codeReviewer.dashboard.focus');
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.openDashboard', () => {
+            vscode.commands.executeCommand('coach.dashboard.focus');
         })
     );
 
     // Configuration command
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.configureAI', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.configureAI', async () => {
             await configureAIProvider();
         })
     );
 
     // Task management commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.completeTask', async (taskId: string) => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.refreshTasks', () => {
+            taskManager.reloadFromDisk(true);
+            vscode.window.showInformationMessage('Tasks refreshed from disk');
+        })
+    );
+
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.completeTask', async (taskId: string) => {
             await taskManager.completeTask(taskId);
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.rescheduleTask', async (taskId: string, newDate: Date) => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.forwardTask', async (taskId?: string) => {
+            await forwardTaskToAgent(taskId, configManager, taskManager);
+        })
+    );
+
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.rescheduleTask', async (taskId: string, newDate: Date) => {
             await taskManager.rescheduleTask(taskId, newDate);
         })
     );
 
     // Natural language task creation
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.createTaskFromDescription', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.createTaskFromDescription', async () => {
             await createTaskFromNaturalLanguage(configManager, suggestionManager, taskManager);
         })
     );
 
     // Task grouping commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.groupTasksByType', () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.groupTasksByType', () => {
             taskPanelProvider.setGroupMode('type');
             vscode.window.showInformationMessage('Tasks grouped by type');
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.groupTasksByStatus', () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.groupTasksByStatus', () => {
             taskPanelProvider.setGroupMode('status');
             vscode.window.showInformationMessage('Tasks grouped by status');
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.groupTasksByPriority', () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.groupTasksByPriority', () => {
             taskPanelProvider.setGroupMode('priority');
             vscode.window.showInformationMessage('Tasks grouped by priority');
         })
     );
 
     // Priority filter commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.filterTasks', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.filterTasks', async () => {
             const currentFilter = taskPanelProvider.getPriorityFilter();
             const options: vscode.QuickPickItem[] = [
                 { label: `${currentFilter.showCritical ? '$(check)' : '$(circle-outline)'} Critical`, description: 'Show critical priority tasks', picked: currentFilter.showCritical },
@@ -279,8 +324,8 @@ function registerCommands(
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.showOnlyHighPriority', () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.showOnlyHighPriority', () => {
             taskPanelProvider.setPriorityFilter({
                 showCritical: true,
                 showHigh: true,
@@ -291,8 +336,8 @@ function registerCommands(
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.showAllPriorities', () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.showAllPriorities', () => {
             taskPanelProvider.setPriorityFilter({
                 showCritical: true,
                 showHigh: true,
@@ -304,8 +349,8 @@ function registerCommands(
     );
 
     // Suggestion management commands
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.acceptSuggestion', async (arg: string | { suggestionId?: string }) => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.acceptSuggestion', async (arg: string | { suggestionId?: string }) => {
             // Handle both direct call (suggestionId string) and context menu call (tree item)
             const suggestionId = typeof arg === 'string' ? arg : arg?.suggestionId;
             if (!suggestionId) return;
@@ -318,8 +363,8 @@ function registerCommands(
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.dismissSuggestion', async (arg: string | { suggestionId?: string }) => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.dismissSuggestion', async (arg: string | { suggestionId?: string }) => {
             const suggestionId = typeof arg === 'string' ? arg : arg?.suggestionId;
             if (!suggestionId) return;
 
@@ -328,8 +373,8 @@ function registerCommands(
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.acceptAllSuggestions', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.acceptAllSuggestions', async () => {
             const tasks = await suggestionManager.acceptAll();
             if (tasks.length > 0) {
                 await taskManager.addTasks(tasks);
@@ -340,8 +385,8 @@ function registerCommands(
         })
     );
 
-    context.subscriptions.push(
-        vscode.commands.registerCommand('codeReviewer.dismissAllSuggestions', async () => {
+    subscriptions.push(
+        vscode.commands.registerCommand('coach.dismissAllSuggestions', async () => {
             await suggestionManager.dismissAll();
             vscode.window.showInformationMessage('All suggestions dismissed');
         })
@@ -695,7 +740,7 @@ async function configureAIProvider(): Promise<void> {
     });
 
     if (apiKey) {
-        const config = vscode.workspace.getConfiguration('codeReviewer');
+        const config = vscode.workspace.getConfiguration('coach');
         await config.update('aiProvider', provider, vscode.ConfigurationTarget.Global);
         await config.update('apiKey', apiKey, vscode.ConfigurationTarget.Global);
 
@@ -718,7 +763,7 @@ async function configureAIProvider(): Promise<void> {
 }
 
 function setupFileWatchers(
-    context: vscode.ExtensionContext,
+    subscriptions: vscode.Disposable[],
     orchestrator: AgentOrchestrator,
     configManager: ConfigManager
 ): void {
@@ -740,7 +785,7 @@ function setupFileWatchers(
         }
     });
 
-    context.subscriptions.push(watcher);
+    subscriptions.push(watcher);
 }
 
 function getWorkspaceKey(): string {
@@ -766,15 +811,11 @@ function isSupportedLanguage(languageId: string): boolean {
     return supported.includes(languageId);
 }
 
-function handleConfigChange(
-    configManager: ConfigManager,
-    annotationController: InlineAnnotationController,
-    context: vscode.ExtensionContext
-): void {
+function handleConfigChange(configManager: ConfigManager, annotationController: InlineAnnotationController): void {
     configManager.reload();
 
     if (configManager.get<boolean>('inlineAnnotations')) {
-        annotationController.activate(context);
+        annotationController.activate();
     } else {
         annotationController.deactivate();
     }
@@ -837,9 +878,152 @@ async function createTaskFromNaturalLanguage(
     });
 }
 
+async function forwardTaskToAgent(taskId: string | undefined, configManager: ConfigManager, taskManager: TaskManager): Promise<void> {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+        vscode.window.showErrorMessage('No workspace folder is open.');
+        return;
+    }
+
+    const task =
+        taskId
+            ? taskManager.getTask(taskId)
+            : await (async () => {
+                  const tasks = taskManager.getAllTasks();
+                  if (tasks.length === 0) {
+                      vscode.window.showInformationMessage('No tasks to forward.');
+                      return undefined;
+                  }
+                  const picked = await vscode.window.showQuickPick(
+                      tasks.map(t => ({ label: t.title, description: t.id, detail: t.description, taskId: t.id })),
+                      { placeHolder: 'Select a task to forward to an agent' }
+                  );
+                  return picked ? taskManager.getTask((picked as any).taskId) : undefined;
+              })();
+
+    if (!task) return;
+
+    if (!configManager.isApiConfigured()) {
+        const choice = await vscode.window.showWarningMessage(
+            'AI provider is not configured. Configure it to run agents.',
+            'Configure AI'
+        );
+        if (choice === 'Configure AI') {
+            await vscode.commands.executeCommand('coach.configureAI');
+        }
+        return;
+    }
+
+    const cfg = ensureWorkspaceAgentsConfigFile(workspaceRoot);
+    const agents = cfg.agents || [];
+
+    const pickedAgent =
+        agents.length > 1
+            ? await vscode.window.showQuickPick(
+                  agents.map(a => ({ label: a.name, description: a.id })),
+                  { placeHolder: 'Select an agent' }
+              )
+            : undefined;
+
+    const agentId = pickedAgent?.description || cfg.defaultAgentId || agents[0]?.id || 'default';
+    const profile = agents.find(a => a.id === agentId) || agents[0];
+
+    const baseProviderConfig = {
+        provider: configManager.aiProvider as any,
+        apiKey: configManager.apiKey,
+        apiEndpoint: configManager.apiEndpoint,
+        model: configManager.model || undefined
+    };
+
+    const providerConfig = profile?.provider
+        ? { ...baseProviderConfig, ...profile.provider, apiKey: baseProviderConfig.apiKey }
+        : baseProviderConfig;
+
+    const provider = createAIProvider(providerConfig);
+
+    const output = vscode.window.createOutputChannel('Coach Agent');
+    output.show(true);
+
+    const previousStatus = task.status;
+    await taskManager.updateTask(task.id, { status: TaskStatus.InProgress });
+
+    const host = createNodeHost(workspaceRoot, (_stream, chunk) => {
+        output.append(chunk);
+    });
+
+    const agent = createTaskExecutionAgent({
+        provider,
+        host,
+        config: cfg,
+        agentId,
+        callbacks: {
+            onProgress: (m) => output.appendLine(m),
+            onLog: (m) => output.appendLine(m),
+            approveCommand: async (command, reason) => {
+                const picked = await vscode.window.showWarningMessage(
+                    `Agent wants to run:\n${command}\n\nReason: ${reason}`,
+                    { modal: true },
+                    'Allow once',
+                    'Always allow (workspace)',
+                    'Deny',
+                    'Abort'
+                );
+                if (picked === 'Abort') return 'abort';
+                if (picked === 'Deny' || !picked) return 'deny';
+                if (picked === 'Always allow (workspace)') return 'allowAlways';
+                return 'allowOnce';
+            }
+        },
+        saveConfig: async (next) => {
+            const current = loadWorkspaceAgentsConfig(workspaceRoot);
+            const merged = {
+                ...current,
+                execution: {
+                    ...current.execution,
+                    allowedCommands: Array.from(new Set([...(current.execution.allowedCommands || []), ...(next.execution.allowedCommands || [])])),
+                    allowedCommandPrefixes: Array.from(new Set([...(current.execution.allowedCommandPrefixes || []), ...(next.execution.allowedCommandPrefixes || [])]))
+                }
+            };
+            writeWorkspaceAgentsConfig(workspaceRoot, merged);
+        }
+    });
+
+    await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: 'Forwarding task to agent...', cancellable: false },
+        async () => {
+            const relAffected = (task.affectedFiles || [])
+                .map(p => vscode.workspace.asRelativePath(p, false).replace(/\\/g, '/'))
+                .filter(p => p && !p.startsWith('..'));
+
+            const res = await agent.execute({
+                title: task.title,
+                description: task.description,
+                affectedFiles: relAffected.length ? relAffected : undefined
+            });
+
+            if (res.ok) {
+                const choice = await vscode.window.showInformationMessage(
+                    `Agent finished: ${res.summary}`,
+                    'Mark task completed',
+                    'Leave in progress'
+                );
+                if (choice === 'Mark task completed') {
+                    await taskManager.completeTask(task.id);
+                }
+            } else {
+                if (previousStatus !== TaskStatus.InProgress) {
+                    await taskManager.updateTask(task.id, { status: previousStatus });
+                }
+                vscode.window.showErrorMessage(`Agent failed: ${res.summary}`);
+            }
+        }
+    );
+}
+
 export function deactivate(): void {
     if (annotationController) {
         annotationController.deactivate();
     }
-    console.log('CodeReviewer AI deactivated');
+    isActivated = false;
+    console.log('Coach deactivated');
 }

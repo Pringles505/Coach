@@ -25,7 +25,7 @@ export class InlineAnnotationController {
     /**
      * Activate inline annotations
      */
-    activate(context: vscode.ExtensionContext): void {
+    activate(): void {
         if (this.isActive) return;
         this.isActive = true;
 

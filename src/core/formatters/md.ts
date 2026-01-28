@@ -6,7 +6,7 @@ function esc(s: string): string {
 
 export function formatMarkdown(result: RunResult): string {
     const lines: string[] = [];
-    lines.push(`# Agent Review`);
+    lines.push(`# Coach`);
     lines.push('');
     lines.push(result.summary);
     lines.push('');
@@ -27,4 +27,3 @@ export function formatMarkdown(result: RunResult): string {
 
     return lines.join('\n');
 }
-
