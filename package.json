@@ -1,0 +1,387 @@
+{
+  "name": "coach",
+  "displayName": "Coach",
+  "description": "AI-powered code review, task assistant, and scheduling system for VS Code",
+  "version": "2.0.1",
+  "publisher": "mascaro101",
+  "author": "mascaro101",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mascaro101/coach.git"
+  },
+  "homepage": "https://github.com/mascaro101/coach#readme",
+  "bugs": {
+    "url": "https://github.com/mascaro101/coach/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "code-review",
+    "refactoring",
+    "testing",
+    "productivity",
+    "calendar",
+    "tasks"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "bin": {
+    "coach": "dist/cli.js"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "coach.analyzeFile",
+        "title": "Coach: Analyze Current File"
+      },
+      {
+        "command": "coach.analyzeWorkspace",
+        "title": "Coach: Analyze Workspace"
+      },
+      {
+        "command": "coach.summarizeFile",
+        "title": "Coach: Summarize This File"
+      },
+      {
+        "command": "coach.summarizeWorkspace",
+        "title": "Coach: Summarize Workspace"
+      },
+      {
+        "command": "coach.generateRefactorPlan",
+        "title": "Coach: Generate Refactor Plan"
+      },
+      {
+        "command": "coach.generateTests",
+        "title": "Coach: Generate Tests for Selection"
+      },
+      {
+        "command": "coach.scheduleModuleFixes",
+        "title": "Coach: Schedule Fixes for This Module"
+      },
+      {
+        "command": "coach.openCalendar",
+        "title": "Coach: Open Calendar View"
+      },
+      {
+        "command": "coach.openDashboard",
+        "title": "Coach: Open Dashboard"
+      },
+      {
+        "command": "coach.configureAI",
+        "title": "Coach: Configure AI Provider"
+      },
+      {
+        "command": "coach.refreshTasks",
+        "title": "Coach: Refresh Tasks from Disk"
+      },
+      {
+        "command": "coach.completeTask",
+        "title": "Coach: Complete Task"
+      },
+      {
+        "command": "coach.forwardTask",
+        "title": "Coach: Forward Task to Agent"
+      },
+      {
+        "command": "coach.rescheduleTask",
+        "title": "Coach: Reschedule Task"
+      },
+      {
+        "command": "coach.createTaskFromDescription",
+        "title": "Coach: Create Task from Description (AI)",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "coach.groupTasksByType",
+        "title": "Coach: Group Tasks by Type"
+      },
+      {
+        "command": "coach.groupTasksByStatus",
+        "title": "Coach: Group Tasks by Status"
+      },
+      {
+        "command": "coach.groupTasksByPriority",
+        "title": "Coach: Group Tasks by Priority"
+      },
+      {
+        "command": "coach.filterTasks",
+        "title": "Coach: Filter Tasks by Priority",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "coach.showOnlyHighPriority",
+        "title": "Coach: Show Only High Priority Tasks"
+      },
+      {
+        "command": "coach.showAllPriorities",
+        "title": "Coach: Show All Priority Levels"
+      },
+      {
+        "command": "coach.acceptSuggestion",
+        "title": "Accept Suggestion",
+        "icon": "$(check)"
+      },
+      {
+        "command": "coach.dismissSuggestion",
+        "title": "Dismiss Suggestion",
+        "icon": "$(x)"
+      },
+      {
+        "command": "coach.acceptAllSuggestions",
+        "title": "Coach: Accept All Suggestions",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "coach.dismissAllSuggestions",
+        "title": "Coach: Dismiss All Suggestions",
+        "icon": "$(trash)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "coach",
+          "title": "Coach",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "coach": [
+        {
+          "id": "coach.dashboard",
+          "name": "Dashboard",
+          "type": "webview"
+        },
+        {
+          "id": "coach.tasks",
+          "name": "Tasks",
+          "type": "webview"
+        },
+        {
+          "id": "coach.codeHealth",
+          "name": "Code Health",
+          "type": "tree"
+        },
+        {
+          "id": "coach.calendar",
+          "name": "Calendar",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Coach",
+      "properties": {
+        "coach.aiProvider": {
+          "type": "string",
+          "default": "anthropic",
+          "enum": [
+            "anthropic",
+            "openai",
+            "azure",
+            "ollama",
+            "custom"
+          ],
+          "description": "AI provider to use for analysis"
+        },
+        "coach.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the selected AI provider"
+        },
+        "coach.apiEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Custom API endpoint (for custom/ollama providers)"
+        },
+        "coach.model": {
+          "type": "string",
+          "default": "",
+          "description": "Model to use for AI analysis (leave blank for provider default)"
+        },
+        "coach.analysisDepth": {
+          "type": "string",
+          "default": "moderate",
+          "enum": [
+            "light",
+            "moderate",
+            "deep"
+          ],
+          "description": "Depth of code analysis"
+        },
+        "coach.autoAnalyze": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically analyze files on save"
+        },
+        "coach.inlineAnnotations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline code annotations"
+        },
+        "coach.workHoursStart": {
+          "type": "number",
+          "default": 9,
+          "description": "Start of work hours (24h format)"
+        },
+        "coach.workHoursEnd": {
+          "type": "number",
+          "default": 17,
+          "description": "End of work hours (24h format)"
+        },
+        "coach.focusSessionDuration": {
+          "type": "number",
+          "default": 90,
+          "description": "Default focus session duration in minutes"
+        },
+        "coach.excludePatterns": {
+          "type": "array",
+          "default": [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/.git/**",
+            "**/coverage/**"
+          ],
+          "description": "Glob patterns to exclude from analysis"
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "coach.analyzeFile",
+          "group": "codeReviewer@1"
+        },
+        {
+          "command": "coach.summarizeFile",
+          "group": "codeReviewer@2"
+        },
+        {
+          "command": "coach.generateTests",
+          "group": "codeReviewer@3",
+          "when": "editorHasSelection"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "coach.analyzeFile",
+          "group": "codeReviewer@1",
+          "when": "resourceScheme == file"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "coach.createTaskFromDescription",
+          "when": "view == coach.tasks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "coach.filterTasks",
+          "when": "view == coach.tasks",
+          "group": "navigation@2"
+        },
+        {
+          "command": "coach.acceptAllSuggestions",
+          "when": "view == coach.tasks",
+          "group": "0_suggestions@1"
+        },
+        {
+          "command": "coach.dismissAllSuggestions",
+          "when": "view == coach.tasks",
+          "group": "0_suggestions@2"
+        },
+        {
+          "command": "coach.groupTasksByType",
+          "when": "view == coach.tasks",
+          "group": "1_grouping@1"
+        },
+        {
+          "command": "coach.groupTasksByStatus",
+          "when": "view == coach.tasks",
+          "group": "1_grouping@2"
+        },
+        {
+          "command": "coach.groupTasksByPriority",
+          "when": "view == coach.tasks",
+          "group": "1_grouping@3"
+        },
+        {
+          "command": "coach.showOnlyHighPriority",
+          "when": "view == coach.tasks",
+          "group": "2_filter@1"
+        },
+        {
+          "command": "coach.showAllPriorities",
+          "when": "view == coach.tasks",
+          "group": "2_filter@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "coach.acceptSuggestion",
+          "when": "view == coach.tasks && viewItem == suggestion",
+          "group": "inline@1"
+        },
+        {
+          "command": "coach.dismissSuggestion",
+          "when": "view == coach.tasks && viewItem == suggestion",
+          "group": "inline@2"
+        },
+        {
+          "command": "coach.acceptSuggestion",
+          "when": "view == coach.tasks && viewItem == suggestion",
+          "group": "suggestion@1"
+        },
+        {
+          "command": "coach.dismissSuggestion",
+          "when": "view == coach.tasks && viewItem == suggestion",
+          "group": "suggestion@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "prepublishOnly": "npm run build",
+    "compile": "tsc -p ./ --noEmit",
+    "compile:test": "tsc -p tsconfig.test.json",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run compile:test && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "vitest run",
+    "package": "vsce package",
+    "build": "node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/picomatch": "^2.3.4",
+    "@types/uuid": "^9.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
+    "esbuild": "^0.19.8",
+    "eslint": "^8.55.0",
+    "typescript": "^5.3.2",
+    "vitest": "^2.1.9"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "fast-glob": "^3.3.2",
+    "jsonc-parser": "^3.3.1",
+    "picomatch": "^4.0.2",
+    "uuid": "^9.0.0"
+  }
+}

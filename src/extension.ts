@@ -39,6 +39,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         analysisCache = new AnalysisCache(context.workspaceState, currentWorkspaceKey);
         taskManager = new TaskManager(context.workspaceState, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
         suggestionManager = new SuggestionManager(context.workspaceState, currentWorkspaceKey);
+        suggestionManager.setWorkspaceRoot(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
 
         let tasksWatcher: vscode.FileSystemWatcher | undefined;
         let reloadDebounceTimer: ReturnType<typeof setTimeout> | undefined;
@@ -80,6 +81,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             currentWorkspaceKey = nextKey;
             analysisCache = new AnalysisCache(context.workspaceState, currentWorkspaceKey);
             suggestionManager = new SuggestionManager(context.workspaceState, currentWorkspaceKey);
+            suggestionManager.setWorkspaceRoot(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
             taskManager.setWorkspaceRoot(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
             refreshTasksWatcher();
 

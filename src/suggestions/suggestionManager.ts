@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { Task, TaskStatus, TaskSuggestion } from '../types';
 
 /**
@@ -11,6 +13,8 @@ import { Task, TaskStatus, TaskSuggestion } from '../types';
 export class SuggestionManager {
     private suggestions: Map<string, TaskSuggestion> = new Map();
     private readonly STORAGE_KEY: string;
+    private workspaceRoot?: string;
+    private tasksFilePath?: string;
 
     private _onSuggestionsChanged = new vscode.EventEmitter<void>();
     readonly onSuggestionsChanged = this._onSuggestionsChanged.event;
@@ -19,6 +23,11 @@ export class SuggestionManager {
         const suffix = workspaceKey?.trim() ? workspaceKey.trim() : 'global';
         this.STORAGE_KEY = `codeReviewer.taskSuggestions:${suffix}`;
         void this.loadFromStorage();
+    }
+
+    setWorkspaceRoot(workspaceRoot?: string): void {
+        this.workspaceRoot = workspaceRoot;
+        this.tasksFilePath = workspaceRoot ? path.join(workspaceRoot, '.coach', 'tasks.json') : undefined;
     }
 
     getAll(): TaskSuggestion[] {
@@ -133,6 +142,45 @@ export class SuggestionManager {
             await this.storage.update(this.STORAGE_KEY, serialized);
         } catch (error) {
             console.error('Failed to save suggestions:', error);
+        }
+
+        this.saveToDisk();
+    }
+
+    /**
+     * Write the current suggestions into `.coach/tasks.json` so the CLI can
+     * read them.  Preserves the existing `tasks` array in the file.
+     */
+    private saveToDisk(): void {
+        if (!this.tasksFilePath) return;
+
+        try {
+            const dir = path.dirname(this.tasksFilePath);
+            fs.mkdirSync(dir, { recursive: true });
+
+            // Preserve the tasks array already on disk.
+            let tasks: unknown[] = [];
+            try {
+                if (fs.existsSync(this.tasksFilePath)) {
+                    const existing = JSON.parse(fs.readFileSync(this.tasksFilePath, 'utf8'));
+                    if (Array.isArray(existing?.tasks)) {
+                        tasks = existing.tasks;
+                    }
+                }
+            } catch {
+                // ignore parse errors; we'll write what we have
+            }
+
+            // Flatten suggestions into serialized task objects for CLI compatibility.
+            const suggestions = Array.from(this.suggestions.values()).map(s => ({
+                ...(this.serializeTask(s.task) as Record<string, unknown>),
+                id: s.id
+            }));
+
+            const fileObj = { version: 1, tasks, suggestions };
+            fs.writeFileSync(this.tasksFilePath, JSON.stringify(fileObj, null, 2) + '\n', 'utf8');
+        } catch (error) {
+            console.error('Failed to save suggestions to disk:', error);
         }
     }
 

@@ -128,8 +128,9 @@ function saveTasks(cwd: string, store: CliTaskStore): void {
 function displayTasks(io: { stdout: { write(s: string): void }; stderr: { write(s: string): void } }, cwd: string): void {
     const store = loadTasks(cwd);
     const width = 60;
+    const inner = width - 2; // content width between │ borders
 
-    const line = (char: string) => char.repeat(width - 2);
+    const line = (char: string) => char.repeat(inner);
     const pad = (s: string, len: number) => {
         // eslint-disable-next-line no-control-regex
         const stripped = s.replace(/\x1b\[[0-9;]*m/g, '');
@@ -141,13 +142,13 @@ function displayTasks(io: { stdout: { write(s: string): void }; stderr: { write(
 
     // Current Tasks Section
     io.stdout.write(`${BOLD}╭${line('─')}╮${RESET}\n`);
-    io.stdout.write(`${BOLD}│${RESET} 📋 ${BOLD}Current Tasks${RESET}${' '.repeat(width - 20)}${BOLD}│${RESET}\n`);
+    io.stdout.write(`${BOLD}│${RESET}${pad(` 📋 ${BOLD}Current Tasks${RESET}`, inner)}${BOLD}│${RESET}\n`);
     io.stdout.write(`${BOLD}├${line('─')}┤${RESET}\n`);
 
     const activeTasks = store.tasks.filter(t => t.status !== 'completed' && t.status !== 'cancelled');
 
     if (activeTasks.length === 0) {
-        io.stdout.write(`${BOLD}│${RESET}${DIM}  No active tasks${RESET}${' '.repeat(width - 20)}${BOLD}│${RESET}\n`);
+        io.stdout.write(`${BOLD}│${RESET}${pad(`${DIM}  No active tasks${RESET}`, inner)}${BOLD}│${RESET}\n`);
     } else {
         for (const task of activeTasks) {
             const icon = STATUS_ICONS[task.status] || '○';
@@ -157,11 +158,11 @@ function displayTasks(io: { stdout: { write(s: string): void }; stderr: { write(
             const shortId = task.id.slice(0, 8);
 
             const titleLine = `  ${icon} ${typeIcon} ${task.title}`;
-            const truncatedTitle = titleLine.length > width - 4 ? titleLine.slice(0, width - 7) + '...' : titleLine;
-            io.stdout.write(`${BOLD}│${RESET}${pad(truncatedTitle, width - 3)}${BOLD}│${RESET}\n`);
+            const truncatedTitle = titleLine.length > inner - 2 ? titleLine.slice(0, inner - 5) + '...' : titleLine;
+            io.stdout.write(`${BOLD}│${RESET}${pad(truncatedTitle, inner)}${BOLD}│${RESET}\n`);
 
             const metaLine = `      ${DIM}${shortId}${RESET} · ${prioColor}${prioLabel}${RESET} · ${task.estimatedMinutes}min · ${task.status}`;
-            io.stdout.write(`${BOLD}│${RESET}${pad(metaLine, width - 3)}${BOLD}│${RESET}\n`);
+            io.stdout.write(`${BOLD}│${RESET}${pad(metaLine, inner)}${BOLD}│${RESET}\n`);
         }
     }
 
@@ -170,29 +171,24 @@ function displayTasks(io: { stdout: { write(s: string): void }; stderr: { write(
 
     // Suggestions Section
     io.stdout.write(`${BOLD}╭${line('─')}╮${RESET}\n`);
-    io.stdout.write(`${BOLD}│${RESET} 💡 ${BOLD}Suggested Tasks${RESET}${' '.repeat(width - 22)}${BOLD}│${RESET}\n`);
+    io.stdout.write(`${BOLD}│${RESET}${pad(` 💡 ${BOLD}Suggested Tasks${RESET}`, inner)}${BOLD}│${RESET}\n`);
     io.stdout.write(`${BOLD}├${line('─')}┤${RESET}\n`);
 
     if (store.suggestions.length === 0) {
-        io.stdout.write(`${BOLD}│${RESET}${DIM}  No suggestions - run 'review' to generate${RESET}${' '.repeat(width - 47)}${BOLD}│${RESET}\n`);
+        io.stdout.write(`${BOLD}│${RESET}${pad(`${DIM}  No suggestions - run 'review' to generate${RESET}`, inner)}${BOLD}│${RESET}\n`);
     } else {
-        for (const task of store.suggestions.slice(0, 5)) {
+        for (const task of store.suggestions) {
             const typeIcon = TYPE_ICONS[task.type] || '•';
             const prioColor = PRIORITY_COLORS[task.priority] || '';
             const prioLabel = PRIORITY_LABELS[task.priority] || 'Medium';
             const shortId = task.id.slice(0, 8);
 
             const titleLine = `  ◇ ${typeIcon} ${task.title}`;
-            const truncatedTitle = titleLine.length > width - 4 ? titleLine.slice(0, width - 7) + '...' : titleLine;
-            io.stdout.write(`${BOLD}│${RESET}${pad(truncatedTitle, width - 3)}${BOLD}│${RESET}\n`);
+            const truncatedTitle = titleLine.length > inner - 2 ? titleLine.slice(0, inner - 5) + '...' : titleLine;
+            io.stdout.write(`${BOLD}│${RESET}${pad(truncatedTitle, inner)}${BOLD}│${RESET}\n`);
 
             const metaLine = `      ${DIM}${shortId}${RESET} · ${prioColor}${prioLabel}${RESET} · ${task.estimatedMinutes}min`;
-            io.stdout.write(`${BOLD}│${RESET}${pad(metaLine, width - 3)}${BOLD}│${RESET}\n`);
-        }
-
-        if (store.suggestions.length > 5) {
-            const moreText = `  ${DIM}... and ${store.suggestions.length - 5} more${RESET}`;
-            io.stdout.write(`${BOLD}│${RESET}${pad(moreText, width - 3)}${BOLD}│${RESET}\n`);
+            io.stdout.write(`${BOLD}│${RESET}${pad(metaLine, inner)}${BOLD}│${RESET}\n`);
         }
     }
 
